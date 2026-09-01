@@ -81,6 +81,11 @@ function setorNome(id){
   var s = STATE.setores.filter(function(x){return x.id===id;})[0];
   return s ? s.nome : id;
 }
+function isConservacao(s){
+  if(!s) return false;
+  var nome = s.setorNome || setorNome(s.setor) || '';
+  return nome.toLowerCase().indexOf('conserv') !== -1;
+}
 function studentById(id){
   return STATE.students.filter(function(s){return s.id===id;})[0] || null;
 }
@@ -504,6 +509,7 @@ function viewAlunos(){
 function punchButton(id){
   var s = studentById(id);
   if(!s) return '<div class="empty-state">Selecione um bolsista na lista ao lado.</div>';
+  if(isConservacao(s)) return punchButtonTurno(s);
   var last = ultimoRegistro(id);
   var next = proximoTipo(id);
   var statusText, warn = '';
@@ -529,6 +535,30 @@ function punchButton(id){
     '</div>' +
     '<div class="punch-time-row">Horas cumpridas hoje: <span class="mono">&nbsp;'+fmtHoras(minsHoje)+'</span></div>' +
     '<div class="view-sub">Esqueceu de bater o ponto num horário certo? Peça o ajuste na aba <b>Pedidos de ajuste</b> — os responsáveis do setor aprovam antes de valer.</div>'
+  );
+}
+
+function turnosHojeCount(id){
+  return registrosDoAluno(id).filter(function(r){ return r.tipo==='saida' && sameDay(r.ts); }).length;
+}
+
+function punchButtonTurno(s){
+  var id = s.id;
+  var minsHoje = minutosTrabalhados(id, todayKey()+'T00:00:00.000Z');
+  var n = turnosHojeCount(id);
+  var statusText = n>0 ? (n===1 ? '1 turno registrado hoje.' : n+' turnos registrados hoje.') : 'Nenhum turno registrado hoje.';
+  return (
+    '<div class="punch-status">' +
+      '<span class="avatar" style="width:44px;height:44px;font-size:15px;">'+initials(s.nome)+'</span>' +
+      '<span class="who">'+esc(s.nome)+'</span>' +
+      '<span class="state">'+esc(s.setorNome || setorNome(s.setor))+' · '+nivelLabel(s.nivel)+'</span>' +
+      '<span class="state">'+statusText+'</span>' +
+    '</div>' +
+    '<div class="punch-actions">' +
+      '<button class="btn btn-lg btn-primary" data-punch-turno data-id="'+id+'">Marcar turno cumprido (+4h)</button>' +
+    '</div>' +
+    '<div class="punch-time-row">Horas cumpridas hoje: <span class="mono">&nbsp;'+fmtHoras(minsHoje)+'</span></div>' +
+    '<div class="view-sub">Pode apertar mais de uma vez no mesmo dia — por exemplo, um turno pela manhã e outro à noite. Cada toque soma 4 horas.</div>'
   );
 }
 
@@ -881,6 +911,20 @@ function bindEvents(){
       persist();
     });
   });
+  $all('[data-punch-turno]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var id = btn.getAttribute('data-id');
+      var s = studentById(id);
+      var inicio = new Date();
+      var fim = new Date(inicio.getTime() + 4*60*60*1000);
+      var origem = UI.punchMode==='lider' ? 'lider' : 'self';
+      addRegistro({id: uid('r'), studentId:id, tipo:'entrada', ts: inicio.toISOString(), origem: origem});
+      addRegistro({id: uid('r'), studentId:id, tipo:'saida', ts: fim.toISOString(), origem: origem});
+      logAtividade('Turno de 4h registrado para '+s.nome+' ('+fmtTime(inicio.toISOString())+'–'+fmtTime(fim.toISOString())+').');
+      toast('Turno de 4h registrado para '+s.nome+'.');
+      persist();
+    });
+  });
 
   // Pedidos view
   var formPedido = $('#form-pedido');
@@ -1012,10 +1056,14 @@ function preserveFocus(sel){
    ============================================================ */
 function viewAlunoPainel(){
   var s = STATE.students[0];
+  var conservacao = isConservacao(s);
   var last = ultimoRegistro(s.id);
   var next = proximoTipo(s.id);
   var statusText;
-  if(!last){
+  if(conservacao){
+    var nTurnos = turnosHojeCount(s.id);
+    statusText = nTurnos>0 ? (nTurnos===1 ? '1 turno registrado hoje.' : nTurnos+' turnos registrados hoje.') : 'Nenhum turno registrado hoje.';
+  } else if(!last){
     statusText = 'Você ainda não bateu o ponto hoje.';
   } else if(last.tipo==='entrada'){
     statusText = sameDay(last.ts) ? ('Em andamento desde ' + fmtTime(last.ts) + '.') : ('Em andamento desde ' + fmtDateTime(last.ts) + '.');
@@ -1053,10 +1101,17 @@ function viewAlunoPainel(){
         '<div><div class="name">'+esc(s.nome)+'</div><div class="setor">'+esc(s.setorNome||'')+'</div></div>' +
       '</div>' +
       '<div class="view-sub">'+statusText+'</div>' +
-      '<div class="punch-actions">' +
-        '<button class="btn btn-lg btn-primary" data-punch-self="entrada" '+(next!=='entrada'?'disabled':'')+'>Marcar chegada agora</button>' +
-        '<button class="btn btn-lg" data-punch-self="saida" '+(next!=='saida'?'disabled':'')+'>Marcar saída agora</button>' +
-      '</div>' +
+      (conservacao ?
+        ('<div class="punch-actions">' +
+          '<button class="btn btn-lg btn-primary" data-punch-turno-self>Marcar turno cumprido (+4h)</button>' +
+        '</div>' +
+        '<div class="view-sub">Pode apertar mais de uma vez no mesmo dia — por exemplo, um turno pela manhã e outro à noite.</div>')
+        :
+        ('<div class="punch-actions">' +
+          '<button class="btn btn-lg btn-primary" data-punch-self="entrada" '+(next!=='entrada'?'disabled':'')+'>Marcar chegada agora</button>' +
+          '<button class="btn btn-lg" data-punch-self="saida" '+(next!=='saida'?'disabled':'')+'>Marcar saída agora</button>' +
+        '</div>')
+      ) +
       '<div class="stat-card" style="margin-top:18px;">' +
         '<span class="label">Saldo desta semana</span>' +
         '<span class="pill '+saldoCls+'" style="font-size:14px;margin-top:6px;">'+saldoTxt+'</span>' +
@@ -1116,6 +1171,29 @@ function bindEventsAluno(){
       // assim que o Firestore confirma — evita duplicar a entrada na tela.
       window.__pontosAddRegistro(rec).then(function(){
         toast((tipo==='entrada'?'Chegada':'Saída')+' registrada.');
+      }).catch(function(){
+        toast('Não foi possível registrar agora. Verifique sua conexão.', 'err');
+        btn.disabled = false;
+      });
+    });
+  });
+  $all('[data-punch-turno-self]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(typeof window.__pontosAddRegistro !== 'function'){
+        toast('Não foi possível registrar agora. Verifique sua conexão.', 'err');
+        return;
+      }
+      btn.disabled = true;
+      var s = STATE.students[0];
+      var inicio = new Date();
+      var fim = new Date(inicio.getTime() + 4*60*60*1000);
+      var recEntrada = {id: uid('r'), studentId: s.id, tipo:'entrada', ts: inicio.toISOString(), origem:'self'};
+      var recSaida = {id: uid('r'), studentId: s.id, tipo:'saida', ts: fim.toISOString(), origem:'self'};
+      window.__pontosAddRegistro(recEntrada).then(function(){
+        return window.__pontosAddRegistro(recSaida);
+      }).then(function(){
+        toast('Turno de 4h registrado.');
+        btn.disabled = false;
       }).catch(function(){
         toast('Não foi possível registrar agora. Verifique sua conexão.', 'err');
         btn.disabled = false;
