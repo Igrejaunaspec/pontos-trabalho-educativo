@@ -340,9 +340,34 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
   }
   .brand{flex-direction:row;align-items:baseline;gap:6px;}
   .nav{flex-direction:row;}
+  .nav-btn{padding:11px 13px;flex:0 0 auto;}
   .nav-btn .count{display:none;}
   .sidebar-foot{display:none;}
   .main{padding:18px 16px 50px;}
+
+  /* Alvos de toque maiores e sem zoom automático do Safari no iPhone
+     (que acontece quando um campo tem font-size menor que 16px). */
+  input,select,textarea{font-size:16px;padding:10px 12px;}
+  .btn{padding:11px 16px;font-size:14px;}
+  .btn-sm{padding:8px 12px;font-size:13px;}
+  .btn-lg{padding:17px 20px;font-size:16px;}
+  label{font-size:13px;}
+
+  .kv-grid{grid-template-columns:1fr;gap:10px;}
+  .drawer{padding:18px 18px 50px;}
+  .drawer-head .name{font-size:19px;}
+  .aluno-wrap{padding:18px 12px 50px;}
+  .aluno-card{padding:20px 16px;}
+  .aluno-topbar{padding:14px 16px;}
+  .punch-status{padding:20px 16px;}
+
+  .login-screen{padding:16px;}
+  .login-card{padding:24px 20px;}
+}
+
+@media (max-width:420px){
+  .stat-grid{grid-template-columns:1fr;}
+  .punch-actions{grid-template-columns:1fr;}
 }
 
 @media (prefers-reduced-motion:reduce){
