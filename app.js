@@ -22,6 +22,8 @@ function freshUI(){
     punchSetor: (STATE.setores[0] || {}).id || '',
     punchSelected: null,
     punchSearch: '',
+    punchBulkMode: false,
+    punchBulkSelected: [],
     pedidosTab: 'pendentes',
     configTab: 'bolsas'
   };
@@ -678,6 +680,54 @@ function punchButtonInline(s){
   );
 }
 
+/* ============================================================
+   Bater ponto em lote — seleciona vários alunos na aba Ponto
+   (modo líder) e aplica a mesma ação a todos de uma vez.
+   ============================================================ */
+function bulkPunch(tipo){
+  var ids = UI.punchBulkSelected.slice();
+  var ok = 0, skip = 0;
+  ids.forEach(function(id){
+    var s = studentById(id);
+    if(!s || isConservacao(s)) { if(s) skip++; return; }
+    if(proximoTipo(id) !== tipo){ skip++; return; }
+    addRegistro({id: uid('r'), studentId:id, tipo:tipo, ts: nowISO(), origem: UI.punchMode==='lider' ? 'lider' : 'self'});
+    logAtividade((tipo==='entrada'?'Chegada':'Saída')+' registrada para '+s.nome+' às '+fmtTime(nowISO())+' (em lote).');
+    ok++;
+  });
+  if(ok>0){
+    toast((tipo==='entrada'?'Chegada registrada':'Saída registrada')+' para '+ok+' aluno'+(ok>1?'s':'')+(skip>0?' ('+skip+' ignorado'+(skip>1?'s':'')+')':'')+'.');
+  } else {
+    toast('Nenhum aluno selecionado estava apto para essa ação.', 'err');
+  }
+  UI.punchBulkSelected = [];
+  UI.punchBulkMode = false;
+  persist();
+}
+function bulkPunchTurno(){
+  var ids = UI.punchBulkSelected.slice();
+  var ok = 0, skip = 0;
+  var inicio = new Date();
+  var fim = new Date(inicio.getTime() + 4*60*60*1000);
+  var origem = UI.punchMode==='lider' ? 'lider' : 'self';
+  ids.forEach(function(id){
+    var s = studentById(id);
+    if(!s || !isConservacao(s)){ if(s) skip++; return; }
+    addRegistro({id: uid('r'), studentId:id, tipo:'entrada', ts: inicio.toISOString(), origem: origem});
+    addRegistro({id: uid('r'), studentId:id, tipo:'saida', ts: fim.toISOString(), origem: origem});
+    logAtividade('Turno de 4h registrado para '+s.nome+' ('+fmtTime(inicio.toISOString())+'–'+fmtTime(fim.toISOString())+', em lote).');
+    ok++;
+  });
+  if(ok>0){
+    toast('Turno de 4h registrado para '+ok+' aluno'+(ok>1?'s':'')+(skip>0?' ('+skip+' fora da Conservação, ignorado'+(skip>1?'s':'')+')':'')+'.');
+  } else {
+    toast('Nenhum aluno selecionado é do setor Conservação.', 'err');
+  }
+  UI.punchBulkSelected = [];
+  UI.punchBulkMode = false;
+  persist();
+}
+
 function viewPonto(){
   var pool = STATE.students.filter(function(s){
     if(!s.ativo) return false;
@@ -694,7 +744,20 @@ function viewPonto(){
     return '<option value="'+s.id+'"'+(UI.punchSetor===s.id?' selected':'')+'>'+esc(s.nome)+'</option>';
   }).join('');
 
+  var bulk = UI.punchMode==='lider' && UI.punchBulkMode;
+
   var listHtml = pool.map(function(s){
+    if(bulk){
+      var checked = UI.punchBulkSelected.indexOf(s.id)!==-1;
+      return (
+        '<button class="punch-item bulk-item'+(checked?' selected':'')+'" data-bulk-select="'+s.id+'" type="button" aria-pressed="'+(checked?'true':'false')+'">' +
+          '<span class="check-box'+(checked?' checked':'')+'" aria-hidden="true"></span>' +
+          '<span class="avatar">'+initials(s.nome)+'</span>' +
+          '<span class="name">'+esc(s.nome)+'</span>' +
+          statusHojePill(s.id) +
+        '</button>'
+      );
+    }
     var key = 'punchSelected:'+s.id;
     var selected = UI.punchSelected===s.id;
     var inline = '';
@@ -717,6 +780,29 @@ function viewPonto(){
     );
   }).join('') || '<div class="empty-state">Nenhum bolsista nesse filtro.</div>';
 
+  var nSel = UI.punchBulkSelected.length;
+  var bulkToolbar = UI.punchMode!=='lider' ? '' : (
+    bulk ?
+      '<div class="bulk-toolbar">' +
+        '<span class="meta">'+nSel+' selecionado'+(nSel===1?'':'s')+'</span>' +
+        '<button class="btn btn-sm btn-ghost" data-bulk-select-all type="button">Selecionar todos</button>' +
+        '<button class="btn btn-sm btn-ghost" data-bulk-clear type="button">Limpar</button>' +
+        '<button class="btn btn-sm btn-ghost" data-bulk-cancel type="button">Cancelar</button>' +
+      '</div>'
+    :
+      '<div class="bulk-toolbar">' +
+        '<button class="btn btn-sm btn-ghost" data-bulk-toggle type="button">☑ Selecionar vários</button>' +
+      '</div>'
+  );
+
+  var bulkActionBar = (bulk && nSel>0) ?
+    '<div class="bulk-actionbar">' +
+      '<button class="btn btn-primary" data-bulk-punch="entrada" type="button">Marcar chegada de todos</button>' +
+      '<button class="btn" data-bulk-punch="saida" type="button">Marcar saída de todos</button>' +
+      '<button class="btn btn-ghost" data-bulk-punch-turno type="button">+4h (Conservação)</button>' +
+    '</div>'
+    : '';
+
   return (
     '<div class="view-head"><div><h1>Registrar ponto</h1><div class="view-sub">Líderes de setor batem o ponto dos alunos do Ensino Médio; alunos da faculdade registram o próprio.</div></div></div>' +
 
@@ -725,17 +811,19 @@ function viewPonto(){
       '<button data-punchmode="aluno" class="'+(UI.punchMode==='aluno'?'active':'')+'">Aluno (faculdade)</button>' +
     '</div>' +
 
-    '<div class="punch-wrap">' +
+    '<div class="punch-wrap'+(bulk?' bulk-wrap':'')+'">' +
       '<div class="card">' +
         '<div class="card-head">' +
           (UI.punchMode==='lider' ? '<select id="punch-setor">'+setorOpts+'</select>' : '<h2>Buscar meu nome</h2>') +
         '</div>' +
         '<div class="card-body">' +
           '<div class="search" style="margin-bottom:10px;"><input type="text" id="punch-busca" placeholder="Buscar por nome…" value="'+esc(UI.punchSearch)+'"></div>' +
+          bulkToolbar +
           '<div class="punch-list">'+listHtml+'</div>' +
+          bulkActionBar +
         '</div>' +
       '</div>' +
-      '<div class="card punch-detail-card"><div class="card-body punch-detail">'+punchButton(UI.punchSelected)+'</div></div>' +
+      (bulk ? '' : '<div class="card punch-detail-card"><div class="card-body punch-detail">'+punchButton(UI.punchSelected)+'</div></div>') +
     '</div>'
   );
 }
@@ -1026,10 +1114,14 @@ function bindEvents(){
 
   // Ponto view
   $all('[data-punchmode]').forEach(function(btn){
-    btn.addEventListener('click', function(){ UI.punchMode = btn.getAttribute('data-punchmode'); UI.punchSelected = null; UI.punchSearch=''; render(); });
+    btn.addEventListener('click', function(){
+      UI.punchMode = btn.getAttribute('data-punchmode'); UI.punchSelected = null; UI.punchSearch='';
+      UI.punchBulkMode = false; UI.punchBulkSelected = [];
+      render();
+    });
   });
   var punchSetorSel = $('#punch-setor');
-  if(punchSetorSel) punchSetorSel.addEventListener('change', function(){ UI.punchSetor = punchSetorSel.value; UI.punchSelected = null; render(); });
+  if(punchSetorSel) punchSetorSel.addEventListener('change', function(){ UI.punchSetor = punchSetorSel.value; UI.punchSelected = null; UI.punchBulkSelected = []; render(); });
   var punchBusca = $('#punch-busca');
   if(punchBusca) punchBusca.addEventListener('input', function(){ UI.punchSearch = punchBusca.value; render(); preserveFocus('#punch-busca'); });
   $all('[data-select-punch]').forEach(function(item){
@@ -1060,6 +1152,35 @@ function bindEvents(){
       persist();
     });
   });
+
+  // Ponto view — seleção em lote
+  var bulkToggleBtn = $('[data-bulk-toggle]');
+  if(bulkToggleBtn) bulkToggleBtn.addEventListener('click', function(){ UI.punchBulkMode = true; UI.punchBulkSelected = []; render(); });
+  var bulkCancelBtn = $('[data-bulk-cancel]');
+  if(bulkCancelBtn) bulkCancelBtn.addEventListener('click', function(){ UI.punchBulkMode = false; UI.punchBulkSelected = []; render(); });
+  var bulkClearBtn = $('[data-bulk-clear]');
+  if(bulkClearBtn) bulkClearBtn.addEventListener('click', function(){ UI.punchBulkSelected = []; render(); });
+  var bulkSelectAllBtn = $('[data-bulk-select-all]');
+  if(bulkSelectAllBtn) bulkSelectAllBtn.addEventListener('click', function(){
+    $all('[data-bulk-select]').forEach(function(el){
+      var id = el.getAttribute('data-bulk-select');
+      if(UI.punchBulkSelected.indexOf(id)===-1) UI.punchBulkSelected.push(id);
+    });
+    render();
+  });
+  $all('[data-bulk-select]').forEach(function(item){
+    item.addEventListener('click', function(){
+      var id = item.getAttribute('data-bulk-select');
+      var i = UI.punchBulkSelected.indexOf(id);
+      if(i===-1) UI.punchBulkSelected.push(id); else UI.punchBulkSelected.splice(i,1);
+      render();
+    });
+  });
+  $all('[data-bulk-punch]').forEach(function(btn){
+    btn.addEventListener('click', function(){ bulkPunch(btn.getAttribute('data-bulk-punch')); });
+  });
+  var bulkTurnoBtn = $('[data-bulk-punch-turno]');
+  if(bulkTurnoBtn) bulkTurnoBtn.addEventListener('click', function(){ bulkPunchTurno(); });
 
   // Pedidos view
   var formPedido = $('#form-pedido');

@@ -398,6 +398,29 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
 .punch-inline-status .state{font-size:12.5px;color:var(--muted);}
 .punch-inline-status .state.accent{color:var(--accent);font-weight:600;}
 
+/* ---------- Ponto: seleção em lote ---------- */
+.punch-wrap.bulk-wrap{display:block;}
+.bulk-toolbar{
+  display:flex;align-items:center;flex-wrap:wrap;gap:8px;
+  padding:8px 2px 12px;
+}
+.bulk-toolbar .meta{font-size:12.5px;color:var(--muted);font-weight:600;margin-right:auto;}
+.check-box{
+  width:20px;height:20px;border-radius:6px;border:1.5px solid var(--border);
+  flex:0 0 auto;background:var(--surface);transition:background var(--ease),border-color var(--ease);
+  position:relative;
+}
+.check-box.checked{background:var(--accent);border-color:var(--accent);}
+.check-box.checked::after{
+  content:"";position:absolute;left:6px;top:2px;width:5px;height:10px;
+  border:solid #fff;border-width:0 2px 2px 0;transform:rotate(40deg);
+}
+.punch-item.bulk-item.selected{background:var(--accent-soft);}
+.bulk-actionbar{
+  display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);
+}
+.bulk-actionbar .btn{flex:1 1 auto;}
+
 .punch-detail{display:flex;flex-direction:column;gap:16px;}
 .punch-status{
   display:flex;flex-direction:column;align-items:center;gap:8px;
