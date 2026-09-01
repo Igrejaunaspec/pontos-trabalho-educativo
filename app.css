@@ -31,36 +31,9 @@
   --sidebar-active-bg:#2563EB;
   --sidebar-hover-bg:rgba(255,255,255,.07);
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --bg:#0B1728;
-    --surface:#11213A;
-    --surface-2:#172B47;
-    --ink:#E8EFF9;
-    --ink-soft:#C2D2E7;
-    --muted:#87A0C0;
-    --border:#233B5B;
-    --accent:#5B9BF6;
-    --accent-ink:#0B1728;
-    --accent-soft:#1B3A63;
-    --success:#4FD199;
-    --success-soft:#123527;
-    --warning:#E7B75E;
-    --warning-soft:#3C2E13;
-    --critical:#EF8888;
-    --critical-soft:#3E1A1A;
-    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -14px rgba(0,0,0,.6);
-
-    --sidebar-bg:#071527;
-    --sidebar-bg-2:#0E223D;
-    --sidebar-ink:#E8EFF9;
-    --sidebar-ink-soft:#A9C0DE;
-    --sidebar-muted:#6E88AC;
-    --sidebar-border:rgba(255,255,255,.07);
-    --sidebar-active-bg:#2563EB;
-    --sidebar-hover-bg:rgba(255,255,255,.055);
-  }
-}
+/* Tema claro (azul & branco, com vermelho para pendências) é o visual
+   padrão do site — não muda sozinho com o modo escuro do sistema, só
+   se no futuro adicionarmos uma opção explícita de tema escuro. */
 :root[data-theme="dark"]{
   --bg:#0B1728;
   --surface:#11213A;
