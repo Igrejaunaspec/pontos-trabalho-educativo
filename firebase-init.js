@@ -24,7 +24,10 @@ var firebaseConfig = {
   appId: "1:317630867115:web:e61720cbacf3e1927db9ee"
 };
 
-var ADMIN_EMAIL = "administracao@trabalhoeducativo.app";
+var ADMIN_EMAILS = ["administracao@trabalhoeducativo.app", "aquila.almeida@adventistas.org"];
+function isAdminEmail(email){
+  return ADMIN_EMAILS.indexOf((email||'').toLowerCase()) !== -1;
+}
 
 var app = initializeApp(firebaseConfig);
 var auth = getAuth(app);
@@ -346,7 +349,7 @@ function handleUserSignedIn(user){
   if(!appRoot.hasChildNodes()){
     appRoot.innerHTML = '<div class="login-loading">Carregando dados…</div>';
   }
-  if(user.email === ADMIN_EMAIL){
+  if(isAdminEmail(user.email)){
     startListeningAdmin();
   } else {
     startListeningAluno(user.uid);
