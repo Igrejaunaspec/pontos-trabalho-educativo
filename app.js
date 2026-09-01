@@ -224,10 +224,12 @@ function saveState(){
   });
 }
 function updateSyncPill(){
-  var dot = $('#sync-dot'), label = $('#sync-label');
-  if(!dot) return;
-  dot.className = 'sync-dot' + (SYNC==='busy' ? ' busy' : SYNC==='off' ? ' off' : '');
-  label.textContent = SYNC==='busy' ? 'Salvando…' : SYNC==='off' ? 'Falha ao salvar' : 'Sincronizado';
+  var dots = $all('.sync-dot'), labels = $all('.sync-label');
+  if(!dots.length) return;
+  var cls = 'sync-dot' + (SYNC==='busy' ? ' busy' : SYNC==='off' ? ' off' : '');
+  var text = SYNC==='busy' ? 'Salvando…' : SYNC==='off' ? 'Falha ao salvar' : 'Sincronizado';
+  dots.forEach(function(d){ d.className = cls; });
+  labels.forEach(function(l){ l.textContent = text; });
 }
 
 /* ============================================================
@@ -240,6 +242,7 @@ var NAV = [
   {id:'pedidos', label:'Pedidos de ajuste', ico:'✉'},
   {id:'config', label:'Configurações', ico:'⚙'}
 ];
+var NAV_SHORT = {dashboard:'Início', alunos:'Alunos', ponto:'Ponto', pedidos:'Pedidos', config:'Ajustes'};
 
 function render(){
   var app = $('#app');
@@ -254,16 +257,30 @@ function render(){
       '<span class="ico">'+n.ico+'</span><span>'+n.label+'</span>'+badge+'</button>';
   }).join('');
 
+  var bottomNavHtml = NAV.map(function(n){
+    var badge = (n.id==='pedidos' && pend>0) ? '<span class="count">'+pend+'</span>' : '';
+    return '<button class="bottom-nav-btn' + (UI.view===n.id?' active':'') + '" data-nav="'+n.id+'">' +
+      '<span class="ico">'+n.ico+badge+'</span><span class="label">'+(NAV_SHORT[n.id]||n.label)+'</span></button>';
+  }).join('');
+
   app.innerHTML =
     '<nav class="sidebar">' +
       '<div class="brand"><span class="mark">' + esc(STATE.orgName) + '</span><span class="sub">Pontos &amp; presença de bolsistas</span></div>' +
       '<div class="nav">' + navHtml + '</div>' +
       '<div class="sidebar-foot">' +
-        '<div class="sync-pill"><span class="sync-dot" id="sync-dot"></span><span id="sync-label">Sincronizado</span></div>' +
-        '<button class="btn btn-ghost btn-sm" id="logout-btn" type="button">Sair</button>' +
+        '<div class="sync-pill"><span class="sync-dot"></span><span class="sync-label">Sincronizado</span></div>' +
+        '<button class="btn btn-ghost btn-sm logout-btn" type="button">Sair</button>' +
       '</div>' +
     '</nav>' +
-    '<main class="main"><div class="view" id="view-root"></div></main>';
+    '<header class="mobile-topbar">' +
+      '<span class="mobile-topbar-mark">' + esc(STATE.orgName) + '</span>' +
+      '<div class="mobile-topbar-actions">' +
+        '<span class="sync-pill sync-pill-compact" aria-hidden="true"><span class="sync-dot"></span></span>' +
+        '<button class="logout-btn" type="button" aria-label="Sair">⏻</button>' +
+      '</div>' +
+    '</header>' +
+    '<main class="main"><div class="view" id="view-root"></div></main>' +
+    '<nav class="bottom-nav" aria-label="Navegação principal">' + bottomNavHtml + '</nav>';
 
   var root = $('#view-root');
   if(UI.view === 'dashboard') root.innerHTML = viewDashboard(dateLabel);
@@ -299,9 +316,9 @@ function viewDashboard(dateLabel){
 
   var rows = maioresPendencias.map(function(s){
     return '<tr data-open="'+s.id+'">' +
-      '<td>'+studentCell(s)+'</td>' +
-      '<td>'+esc(setorNome(s.setor))+'</td>' +
-      '<td>'+pill(s.pendenteHerdada)+'</td>' +
+      '<td data-label="Bolsista">'+studentCell(s)+'</td>' +
+      '<td data-label="Setor">'+esc(setorNome(s.setor))+'</td>' +
+      '<td data-label="Pendência">'+pill(s.pendenteHerdada)+'</td>' +
     '</tr>';
   }).join('') || '<tr><td colspan="3"><div class="empty-state">Nenhuma pendência herdada da planilha acima de 8h. 🎉</div></td></tr>';
 
@@ -472,13 +489,13 @@ function viewAlunos(){
   var rows = list.map(function(s){
     var incompleto = !s.bolsa || !s.diasTrabalho;
     return '<tr data-open="'+s.id+'">' +
-      '<td>'+studentCell(s)+(incompleto?' <span class="tag" title="Dados incompletos na planilha original">incompleto</span>':'')+'</td>' +
-      '<td>'+esc(setorNome(s.setor))+'</td>' +
-      '<td><span class="pill pill-muted">'+nivelLabel(s.nivel)+'</span></td>' +
-      '<td class="mono">'+horasSemanaLabel(s)+'</td>' +
-      '<td>'+esc(s.diasTrabalho||'—')+'</td>' +
-      '<td>'+statusHojePill(s.id)+'</td>' +
-      '<td>'+pill(s.pendenteHerdada)+'</td>' +
+      '<td data-label="Bolsista">'+studentCell(s)+(incompleto?' <span class="tag" title="Dados incompletos na planilha original">incompleto</span>':'')+'</td>' +
+      '<td data-label="Setor">'+esc(setorNome(s.setor))+'</td>' +
+      '<td data-label="Nível"><span class="pill pill-muted">'+nivelLabel(s.nivel)+'</span></td>' +
+      '<td class="mono" data-label="Carga">'+horasSemanaLabel(s)+'</td>' +
+      '<td data-label="Dias de trabalho">'+esc(s.diasTrabalho||'—')+'</td>' +
+      '<td data-label="Hoje">'+statusHojePill(s.id)+'</td>' +
+      '<td data-label="Pendência herdada">'+pill(s.pendenteHerdada)+'</td>' +
     '</tr>';
   }).join('') || '<tr><td colspan="7"><div class="empty-state">Nenhum bolsista encontrado com esses filtros.</div></td></tr>';
 
@@ -696,7 +713,7 @@ function viewConfig(){
     (UI.configTab==='bolsas' ?
       '<div class="card"><div class="card-head"><h2>Horas semanais por código de bolsa</h2><span class="meta">usado para calcular a meta de cada aluno</span></div>' +
       '<div class="card-body tight"><div class="table-wrap"><table><thead><tr><th>Código</th><th class="num">Horas/semana</th><th></th></tr></thead><tbody>'+bolsaRows+'</tbody></table></div></div>' +
-      '<div class="card-body"><form id="form-novo-bolsa" class="toolbar"><input type="text" name="codigo" placeholder="Novo código (ex.: ADP3)" style="max-width:200px;" required><input type="number" name="horas" placeholder="Horas/semana" style="max-width:140px;"><button class="btn btn-sm" type="submit">Adicionar código</button></form></div></div>'
+      '<div class="card-body"><form id="form-novo-bolsa" class="toolbar"><input type="text" name="codigo" class="w-200" placeholder="Novo código (ex.: ADP3)" required><input type="number" name="horas" class="w-140" placeholder="Horas/semana"><button class="btn btn-sm" type="submit">Adicionar código</button></form></div></div>'
       : '') +
 
     (UI.configTab==='lideres' ?
@@ -707,7 +724,7 @@ function viewConfig(){
 
     (UI.configTab==='pontos' ?
       '<div class="card"><div class="card-head"><h2>Conversão de pontos</h2></div><div class="card-body">' +
-      '<label style="max-width:260px;">Pontos por hora trabalhada<input type="number" min="0" step="0.5" id="input-pontos-hora" value="'+STATE.pontosPorHora+'"></label>' +
+      '<label class="w-260">Pontos por hora trabalhada<input type="number" min="0" step="0.5" id="input-pontos-hora" value="'+STATE.pontosPorHora+'"></label>' +
       '<p class="view-sub" style="margin-top:10px;">Cada hora completa registrada (chegada + saída confirmadas) vale essa quantidade de pontos no perfil do aluno. Ajuste aqui se a regra de pontuação mudar.</p>' +
       '</div></div>'
       : '') +
@@ -868,9 +885,10 @@ function bindEvents(){
   $all('[data-nav]').forEach(function(btn){
     btn.addEventListener('click', function(){ UI.view = btn.getAttribute('data-nav'); render(); });
   });
-  var logoutBtn = $('#logout-btn');
-  if(logoutBtn) logoutBtn.addEventListener('click', function(){
-    if(typeof window.__pontosLogout === 'function') window.__pontosLogout();
+  $all('.logout-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(typeof window.__pontosLogout === 'function') window.__pontosLogout();
+    });
   });
 
   // Alunos view
