@@ -7,6 +7,7 @@
    ============================================================ */
 var STATE = null;
 var UI = null;
+var MODE = 'admin'; // 'admin' | 'aluno'
 function freshUI(){
   return {
     view: 'dashboard',
@@ -151,6 +152,18 @@ function pedidosPendentes(){
 function logAtividade(texto){
   STATE.activityLog.unshift({ts: nowISO(), texto: texto});
   if(STATE.activityLog.length > 60) STATE.activityLog.length = 60;
+}
+function addRegistro(rec){
+  STATE.registros.push(rec);
+  if(typeof window.__pontosAddRegistro === 'function') window.__pontosAddRegistro(rec);
+}
+function mondayDaSemanaISO(){
+  var d = new Date();
+  var day = d.getDay(); // 0 = domingo
+  var diff = (day===0) ? 6 : day-1; // dias desde a última segunda-feira
+  d.setDate(d.getDate()-diff);
+  d.setHours(0,0,0,0);
+  return d.toISOString();
 }
 
 /* ============================================================
@@ -849,7 +862,7 @@ function bindEvents(){
       var id = btn.getAttribute('data-id');
       var tipo = btn.getAttribute('data-punch');
       var s = studentById(id);
-      STATE.registros.push({id: uid('r'), studentId:id, tipo:tipo, ts: nowISO(), origem: UI.punchMode==='lider' ? 'lider' : 'self'});
+      addRegistro({id: uid('r'), studentId:id, tipo:tipo, ts: nowISO(), origem: UI.punchMode==='lider' ? 'lider' : 'self'});
       logAtividade((tipo==='entrada'?'Chegada':'Saída')+' registrada para '+s.nome+' às '+fmtTime(nowISO())+'.');
       toast((tipo==='entrada'?'Chegada':'Saída')+' registrada para '+s.nome+'.');
       persist();
@@ -962,7 +975,7 @@ function resolvePedido(id, status, respPor){
   if(status==='aprovado'){
     var ts = p.data + 'T' + p.horario + ':00';
     var d = new Date(ts);
-    STATE.registros.push({id: uid('r'), studentId: p.studentId, tipo: p.tipoAlvo, ts: d.toISOString(), origem:'ajuste-aprovado'});
+    addRegistro({id: uid('r'), studentId: p.studentId, tipo: p.tipoAlvo, ts: d.toISOString(), origem:'ajuste-aprovado'});
     logAtividade('Pedido de ajuste de '+(s?s.nome:'')+' aprovado por '+respPor+'.');
     toast('Pedido aprovado e ponto ajustado.');
   } else {
@@ -980,17 +993,131 @@ function preserveFocus(sel){
 }
 
 /* ============================================================
+   Painel do aluno (login individual — faculdade)
+   Acesso restrito: só o próprio perfil e os próprios registros.
+   ============================================================ */
+function viewAlunoPainel(){
+  var s = STATE.students[0];
+  var last = ultimoRegistro(s.id);
+  var next = proximoTipo(s.id);
+  var statusText;
+  if(!last){
+    statusText = 'Você ainda não bateu o ponto hoje.';
+  } else if(last.tipo==='entrada'){
+    statusText = sameDay(last.ts) ? ('Em andamento desde ' + fmtTime(last.ts) + '.') : ('Em andamento desde ' + fmtDateTime(last.ts) + '.');
+  } else {
+    statusText = sameDay(last.ts) ? ('Você saiu às ' + fmtTime(last.ts) + '. Pode registrar nova chegada se voltar hoje.') : 'Você ainda não bateu o ponto hoje.';
+  }
+
+  var minsSemana = minutosTrabalhados(s.id, mondayDaSemanaISO());
+  var metaSemana = (s.horasSemana||0) * 60;
+  var saldo = minsSemana - metaSemana;
+  var saldoTxt, saldoCls;
+  if(!s.horasSemana){
+    saldoTxt = 'Carga horária semanal não definida.'; saldoCls = 'pill-muted';
+  } else if(saldo >= 0){
+    saldoTxt = fmtHoras(saldo) + ' a mais esta semana'; saldoCls = 'pill-ok';
+  } else {
+    saldoTxt = fmtHoras(-saldo) + ' devendo esta semana'; saldoCls = 'pill-crit';
+  }
+
+  var historico = registrosDoAluno(s.id).slice().reverse().slice(0,10).map(function(r){
+    return '<div class="log-item"><span class="t">'+fmtDateTime(r.ts)+'</span><span>'+(r.tipo==='entrada'?'Chegada':'Saída')+'</span></div>';
+  }).join('') || '<div class="empty-state">Nenhum registro ainda.</div>';
+
+  return (
+    '<div class="aluno-card">' +
+      '<div class="aluno-head">' +
+        '<span class="avatar" style="width:52px;height:52px;font-size:17px;">'+initials(s.nome)+'</span>' +
+        '<div><div class="name">'+esc(s.nome)+'</div><div class="setor">'+esc(s.setorNome||'')+'</div></div>' +
+      '</div>' +
+      '<div class="view-sub">'+statusText+'</div>' +
+      '<div class="punch-actions">' +
+        '<button class="btn btn-lg btn-primary" data-punch-self="entrada" '+(next!=='entrada'?'disabled':'')+'>Marcar chegada agora</button>' +
+        '<button class="btn btn-lg" data-punch-self="saida" '+(next!=='saida'?'disabled':'')+'>Marcar saída agora</button>' +
+      '</div>' +
+      '<div class="stat-card" style="margin-top:18px;">' +
+        '<span class="label">Saldo desta semana</span>' +
+        '<span class="pill '+saldoCls+'" style="font-size:14px;margin-top:6px;">'+saldoTxt+'</span>' +
+        '<span class="hint">meta: '+(s.horasSemana?s.horasSemana+'h/semana':'—')+'</span>' +
+      '</div>' +
+      '<div style="margin-top:18px;"><h3 style="font-size:13px;margin-bottom:8px;">Últimos registros</h3><div class="log-list">'+historico+'</div></div>' +
+    '</div>'
+  );
+}
+function renderAluno(){
+  var app = $('#app');
+  app.innerHTML =
+    '<div class="aluno-shell">' +
+      '<div class="aluno-topbar"><span class="mark">'+esc(STATE.orgName||'Trabalho Educativo')+'</span>' +
+        '<button class="btn btn-ghost btn-sm" id="logout-btn" type="button">Sair</button></div>' +
+      '<div class="aluno-wrap">'+viewAlunoPainel()+'</div>' +
+    '</div>';
+  if(!$('.toast-stack')){
+    var stack = document.createElement('div');
+    stack.className = 'toast-stack';
+    stack.id = 'toast-stack';
+    document.body.appendChild(stack);
+  }
+  bindEventsAluno();
+}
+function bindEventsAluno(){
+  var logoutBtn = $('#logout-btn');
+  if(logoutBtn) logoutBtn.addEventListener('click', function(){
+    if(typeof window.__pontosLogout === 'function') window.__pontosLogout();
+  });
+  $all('[data-punch-self]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(typeof window.__pontosAddRegistro !== 'function'){
+        toast('Não foi possível registrar agora. Verifique sua conexão.', 'err');
+        return;
+      }
+      btn.disabled = true;
+      var tipo = btn.getAttribute('data-punch-self');
+      var s = STATE.students[0];
+      var rec = {id: uid('r'), studentId: s.id, tipo: tipo, ts: nowISO(), origem:'self'};
+      window.__pontosAddRegistro(rec).then(function(){
+        STATE.registros.push(rec);
+        toast((tipo==='entrada'?'Chegada':'Saída')+' registrada.');
+        renderAluno();
+      }).catch(function(){
+        toast('Não foi possível registrar agora. Verifique sua conexão.', 'err');
+        btn.disabled = false;
+      });
+    });
+  });
+}
+
+/* ============================================================
    Boot — chamado pelo firebase-init.js
    ============================================================ */
 window.__pontosBoot = function(initialState){
+  MODE = 'admin';
   STATE = initialState;
   UI = freshUI();
   render();
 };
 window.__pontosApplyRemote = function(newState){
-  if(!STATE) return; // ainda não fez boot
+  if(MODE!=='admin' || !STATE) return; // ainda não fez boot, ou é sessão de aluno
   STATE = newState;
   render();
+};
+
+window.__pontosStudentBoot = function(perfil, registros){
+  MODE = 'aluno';
+  STATE = {
+    students: [perfil],
+    registros: registros || [],
+    setores: [], lideres: [], bolsaHoras: {}, pedidos: [], activityLog: [],
+    pontosPorHora: 0, orgName: 'Trabalho Educativo'
+  };
+  renderAluno();
+};
+window.__pontosStudentApply = function(perfil, registros){
+  if(MODE!=='aluno' || !STATE) return;
+  STATE.students = [perfil];
+  STATE.registros = registros || [];
+  renderAluno();
 };
 
 })();

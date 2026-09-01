@@ -397,3 +397,21 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
   min-height:100vh;display:flex;align-items:center;justify-content:center;
   color:var(--muted);font-size:13px;background:var(--bg);
 }
+
+/* ---------- Painel do aluno (login individual) ---------- */
+.aluno-shell{min-height:100vh;background:var(--bg);}
+.aluno-topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 20px;border-bottom:1px solid var(--border);background:var(--surface);
+}
+.aluno-topbar .mark{font-family:var(--font-display);font-weight:800;letter-spacing:-.015em;font-size:16px;color:var(--ink);}
+.aluno-wrap{display:flex;justify-content:center;padding:28px 16px 60px;}
+.aluno-card{
+  width:100%;max-width:420px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);box-shadow:var(--shadow);padding:26px 22px;
+}
+.aluno-head{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.aluno-head .name{font-family:var(--font-display);font-weight:700;font-size:17px;color:var(--ink);}
+.aluno-head .setor{font-size:12.5px;color:var(--muted);}
+.aluno-card .punch-actions{margin-top:14px;}
+.aluno-card .stat-card{align-items:flex-start;}
