@@ -157,6 +157,19 @@ function addRegistro(rec){
   STATE.registros.push(rec);
   if(typeof window.__pontosAddRegistro === 'function') window.__pontosAddRegistro(rec);
 }
+function addPedido(rec){
+  STATE.pedidos.push(rec);
+  if(typeof window.__pontosAddPedido === 'function') window.__pontosAddPedido(rec);
+}
+function updatePedidoRemoto(id, patch){
+  if(typeof window.__pontosUpdatePedido === 'function') window.__pontosUpdatePedido(id, patch);
+}
+function pedidoStatusLabel(status){
+  return status==='pendente' ? 'Pendente' : status==='aprovado' ? 'Aprovado' : 'Rejeitado';
+}
+function pedidoStatusCls(status){
+  return status==='pendente' ? 'pill-muted' : status==='aprovado' ? 'pill-ok' : 'pill-crit';
+}
 function mondayDaSemanaISO(){
   var d = new Date();
   var day = d.getDay(); // 0 = domingo
@@ -877,7 +890,7 @@ function bindEvents(){
     var studentId = fd.get('studentId');
     if(!studentId){ toast('Selecione o aluno.', 'err'); return; }
     var s = studentById(studentId);
-    STATE.pedidos.push({
+    addPedido({
       id: uid('p'), studentId: studentId, data: fd.get('data'), tipoAlvo: fd.get('tipoAlvo'),
       horario: fd.get('horario'), motivo: (fd.get('motivo')||'').trim(),
       status: 'pendente', criadoEm: nowISO()
@@ -971,6 +984,7 @@ function resolvePedido(id, status, respPor){
   p.status = status;
   p.resolvidoEm = nowISO();
   p.resolvidoPor = respPor;
+  updatePedidoRemoto(id, {status: p.status, resolvidoEm: p.resolvidoEm, resolvidoPor: p.resolvidoPor});
   var s = studentById(p.studentId);
   if(status==='aprovado'){
     var ts = p.data + 'T' + p.horario + ':00';
@@ -1025,6 +1039,13 @@ function viewAlunoPainel(){
     return '<div class="log-item"><span class="t">'+fmtDateTime(r.ts)+'</span><span>'+(r.tipo==='entrada'?'Chegada':'Saída')+'</span></div>';
   }).join('') || '<div class="empty-state">Nenhum registro ainda.</div>';
 
+  var meusPedidos = STATE.pedidos.slice().sort(function(a,b){ return new Date(b.criadoEm) - new Date(a.criadoEm); });
+  var pedidosHtml = meusPedidos.slice(0,8).map(function(p){
+    return '<div class="log-item"><span class="t">'+fmtDateBR(p.data)+' · '+p.horario+'</span>' +
+      '<span style="flex:1;">'+(p.tipoAlvo==='entrada'?'Chegada':'Saída')+'</span>' +
+      '<span class="pill '+pedidoStatusCls(p.status)+'">'+pedidoStatusLabel(p.status)+'</span></div>';
+  }).join('') || '<div class="empty-state">Nenhum pedido enviado ainda.</div>';
+
   return (
     '<div class="aluno-card">' +
       '<div class="aluno-head">' +
@@ -1042,6 +1063,20 @@ function viewAlunoPainel(){
         '<span class="hint">meta: '+(s.horasSemana?s.horasSemana+'h/semana':'—')+'</span>' +
       '</div>' +
       '<div style="margin-top:18px;"><h3 style="font-size:13px;margin-bottom:8px;">Últimos registros</h3><div class="log-list">'+historico+'</div></div>' +
+      '<div style="margin-top:22px;">' +
+        '<h3 style="font-size:13px;margin-bottom:8px;">Pedir ajuste de ponto</h3>' +
+        '<div class="view-sub" style="margin-bottom:10px;">Esqueceu de bater o ponto num horário certo? Peça o ajuste aqui — a administração aprova antes de valer nas suas horas.</div>' +
+        '<form id="form-pedido-aluno" style="display:flex;flex-direction:column;gap:10px;">' +
+          '<div class="field-row">' +
+            '<label>Data<input type="date" name="data" required value="'+todayKey()+'" max="'+todayKey()+'"></label>' +
+            '<label>Tipo<select name="tipoAlvo"><option value="entrada">Chegada</option><option value="saida">Saída</option></select></label>' +
+            '<label>Horário<input type="time" name="horario" required></label>' +
+          '</div>' +
+          '<label>Motivo<textarea name="motivo" placeholder="Ex.: esqueci de bater o ponto na chegada, cheguei às 13h"></textarea></label>' +
+          '<div><button class="btn btn-primary btn-sm" type="submit">Enviar pedido</button></div>' +
+        '</form>' +
+        '<div class="log-list" style="margin-top:14px;">'+pedidosHtml+'</div>' +
+      '</div>' +
     '</div>'
   );
 }
@@ -1076,14 +1111,38 @@ function bindEventsAluno(){
       var tipo = btn.getAttribute('data-punch-self');
       var s = STATE.students[0];
       var rec = {id: uid('r'), studentId: s.id, tipo: tipo, ts: nowISO(), origem:'self'};
+      // Não mexemos em STATE.registros aqui: o listener em tempo real
+      // (window.__pontosStudentApply) já traz o novo registro e re-renderiza
+      // assim que o Firestore confirma — evita duplicar a entrada na tela.
       window.__pontosAddRegistro(rec).then(function(){
-        STATE.registros.push(rec);
         toast((tipo==='entrada'?'Chegada':'Saída')+' registrada.');
-        renderAluno();
       }).catch(function(){
         toast('Não foi possível registrar agora. Verifique sua conexão.', 'err');
         btn.disabled = false;
       });
+    });
+  });
+  var formPedidoAluno = $('#form-pedido-aluno');
+  if(formPedidoAluno) formPedidoAluno.addEventListener('submit', function(e){
+    e.preventDefault();
+    if(typeof window.__pontosAddPedido !== 'function'){
+      toast('Não foi possível enviar agora. Verifique sua conexão.', 'err');
+      return;
+    }
+    var fd = new FormData(formPedidoAluno);
+    var s = STATE.students[0];
+    var rec = {
+      id: uid('p'), studentId: s.id, data: fd.get('data'), tipoAlvo: fd.get('tipoAlvo'),
+      horario: fd.get('horario'), motivo: (fd.get('motivo')||'').trim(),
+      status: 'pendente', criadoEm: nowISO()
+    };
+    // Assim como no ponto: não mexemos em STATE.pedidos aqui, o listener em
+    // tempo real traz o pedido recém-criado e re-renderiza sozinho.
+    window.__pontosAddPedido(rec).then(function(){
+      formPedidoAluno.reset();
+      toast('Pedido enviado para aprovação.');
+    }).catch(function(){
+      toast('Não foi possível enviar o pedido agora.', 'err');
     });
   });
 }
@@ -1103,20 +1162,22 @@ window.__pontosApplyRemote = function(newState){
   render();
 };
 
-window.__pontosStudentBoot = function(perfil, registros){
+window.__pontosStudentBoot = function(perfil, registros, pedidos){
   MODE = 'aluno';
   STATE = {
     students: [perfil],
     registros: registros || [],
-    setores: [], lideres: [], bolsaHoras: {}, pedidos: [], activityLog: [],
+    pedidos: pedidos || [],
+    setores: [], lideres: [], bolsaHoras: {}, activityLog: [],
     pontosPorHora: 0, orgName: 'Trabalho Educativo'
   };
   renderAluno();
 };
-window.__pontosStudentApply = function(perfil, registros){
+window.__pontosStudentApply = function(perfil, registros, pedidos){
   if(MODE!=='aluno' || !STATE) return;
   STATE.students = [perfil];
   STATE.registros = registros || [];
+  STATE.pedidos = pedidos || [];
   renderAluno();
 };
 

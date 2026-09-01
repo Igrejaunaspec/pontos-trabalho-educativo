@@ -1,8 +1,9 @@
 /* ============================================================
    Firebase — autenticação (Email/Password) + Firestore
-   Admin: usa o documento único app/state (como antes).
-   Alunos (login individual): usam as coleções students/{id} e
-   registros/{id}, com acesso restrito só aos próprios dados
+   Admin: usa o documento único app/state (como antes) mais as
+   coleções "registros" e "pedidos".
+   Alunos (login individual): usam students/{id}, e as coleções
+   "registros" e "pedidos" filtradas só pelos próprios dados
    (ver regras de segurança do Firestore).
    ============================================================ */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
@@ -10,7 +11,7 @@ import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
-  getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, where, writeBatch
+  getFirestore, doc, setDoc, updateDoc, getDoc, onSnapshot, collection, query, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 var firebaseConfig = {
@@ -35,8 +36,10 @@ var lastSentJSON = null;
 // listeners ativos (para poder cancelar ao trocar de papel / deslogar)
 var unsubAdminState = null;
 var unsubAdminRegistros = null;
+var unsubAdminPedidos = null;
 var unsubAlunoPerfil = null;
 var unsubAlunoRegistros = null;
+var unsubAlunoPedidos = null;
 
 var loginScreen = document.getElementById('login-screen');
 var appRoot = document.getElementById('app');
@@ -81,17 +84,20 @@ window.__pontosLogout = function(){
 function stopAllListeners(){
   if(unsubAdminState){ unsubAdminState(); unsubAdminState = null; }
   if(unsubAdminRegistros){ unsubAdminRegistros(); unsubAdminRegistros = null; }
+  if(unsubAdminPedidos){ unsubAdminPedidos(); unsubAdminPedidos = null; }
   if(unsubAlunoPerfil){ unsubAlunoPerfil(); unsubAlunoPerfil = null; }
   if(unsubAlunoRegistros){ unsubAlunoRegistros(); unsubAlunoRegistros = null; }
+  if(unsubAlunoPedidos){ unsubAlunoPedidos(); unsubAlunoPedidos = null; }
 }
 
 /* ============================================================
-   Admin — app/state (perfis, setores, líderes, bolsas, pedidos,
-   log de atividade) + coleção registros (chegadas/saídas)
+   Admin — app/state (perfis, setores, líderes, bolsas, log de
+   atividade) + coleções "registros" e "pedidos"
    ============================================================ */
 window.__pontosSaveState = function(state){
   var clean = JSON.parse(JSON.stringify(state));
-  delete clean.registros; // registros vivem só na coleção "registros" agora
+  delete clean.registros; // vive só na coleção "registros" agora
+  delete clean.pedidos;   // vive só na coleção "pedidos" agora
   lastSentJSON = JSON.stringify(clean);
 
   var batch = writeBatch(db);
@@ -107,15 +113,22 @@ window.__pontosSaveState = function(state){
 window.__pontosAddRegistro = function(rec){
   return setDoc(doc(db, 'registros', rec.id), rec);
 };
+window.__pontosAddPedido = function(rec){
+  return setDoc(doc(db, 'pedidos', rec.id), rec);
+};
+window.__pontosUpdatePedido = function(id, patch){
+  return updateDoc(doc(db, 'pedidos', id), patch);
+};
 
 function startListeningAdmin(){
   if(unsubAdminState) return;
   var lastDocData = null;
   var lastRegistros = [];
+  var lastPedidos = [];
 
   function emit(){
     if(lastDocData===null) return;
-    var merged = Object.assign({}, lastDocData, {registros: lastRegistros});
+    var merged = Object.assign({}, lastDocData, {registros: lastRegistros, pedidos: lastPedidos});
     if(!booted){
       booted = true;
       window.__pontosBoot(merged);
@@ -140,6 +153,11 @@ function startListeningAdmin(){
     lastRegistros = snap.docs.map(function(d){ return d.data(); });
     emit();
   }, function(err){ console.error('[pontos] registros snapshot error', err); });
+
+  unsubAdminPedidos = onSnapshot(collection(db, 'pedidos'), function(snap){
+    lastPedidos = snap.docs.map(function(d){ return d.data(); });
+    emit();
+  }, function(err){ console.error('[pontos] pedidos snapshot error', err); });
 }
 
 function seedInitialState(){
@@ -152,7 +170,7 @@ function seedInitialState(){
 
 /* ============================================================
    Aluno (faculdade) — login individual, acesso restrito a
-   students/{seuId} e registros do próprio id.
+   students/{seuId} e aos registros/pedidos do próprio id.
    ============================================================ */
 function startListeningAluno(uid){
   if(unsubAlunoPerfil) return;
@@ -163,15 +181,15 @@ function startListeningAluno(uid){
       return;
     }
     var studentId = snap.data().studentId;
-    var perfil = null, registros = [], perfilLoaded = false;
+    var perfil = null, registros = [], pedidos = [], perfilLoaded = false;
 
     function emitAluno(){
       if(!perfilLoaded) return;
       if(!booted){
         booted = true;
-        window.__pontosStudentBoot(perfil, registros);
+        window.__pontosStudentBoot(perfil, registros, pedidos);
       } else {
-        window.__pontosStudentApply(perfil, registros);
+        window.__pontosStudentApply(perfil, registros, pedidos);
       }
     }
 
@@ -189,6 +207,15 @@ function startListeningAluno(uid){
         emitAluno();
       },
       function(err){ console.error('[pontos] registros(aluno) snapshot error', err); }
+    );
+
+    unsubAlunoPedidos = onSnapshot(
+      query(collection(db, 'pedidos'), where('studentId', '==', studentId)),
+      function(snap){
+        pedidos = snap.docs.map(function(d){ return d.data(); });
+        emitAluno();
+      },
+      function(err){ console.error('[pontos] pedidos(aluno) snapshot error', err); }
     );
   }).catch(function(err){
     console.error('[pontos] alunoAuth lookup error', err);
