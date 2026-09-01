@@ -17,6 +17,7 @@ function freshUI(){
     alunoFiltroSetor: 'todos',
     alunoFiltroNivel: 'todos',
     alunoBusca: '',
+    alunoAberto: null,      // id do aluno com o card-acordeão aberto (mobile)
     punchMode: 'lider',     // 'lider' | 'aluno'
     punchSetor: (STATE.setores[0] || {}).id || '',
     punchSelected: null,
@@ -26,6 +27,49 @@ function freshUI(){
   };
 }
 var SYNC = 'idle'; // idle | busy | off
+
+/* ============================================================
+   Acordeões (Alunos / Ponto) — animação max-height coreografada
+   com flags transientes fora de UI (freshUI() não deve resetá-las)
+   ============================================================ */
+var PENDING_OPEN_KEY = null;
+var PENDING_CLOSE_KEY = null;
+function toggleAccordion(fieldName, id){
+  var key = fieldName+':'+id;
+  if(UI[fieldName] === id){
+    PENDING_CLOSE_KEY = key;
+    UI[fieldName] = null;
+  } else {
+    if(UI[fieldName]){ PENDING_CLOSE_KEY = fieldName+':'+UI[fieldName]; }
+    UI[fieldName] = id;
+    PENDING_OPEN_KEY = key;
+  }
+}
+function accordionPanelClass(fieldName, id){
+  var key = fieldName+':'+id;
+  var isOpen = UI[fieldName] === id;
+  var isClosing = PENDING_CLOSE_KEY === key;
+  var cls = 'acc-panel';
+  if((isOpen && PENDING_OPEN_KEY!==key) || isClosing) cls += ' acc-open';
+  return cls;
+}
+function accordionShouldRender(fieldName, id){
+  var key = fieldName+':'+id;
+  return UI[fieldName]===id || PENDING_CLOSE_KEY===key;
+}
+function syncAccordionAnimations(){
+  if(PENDING_OPEN_KEY){
+    var key = PENDING_OPEN_KEY; PENDING_OPEN_KEY = null;
+    var el = document.querySelector('[data-acc-key="'+key+'"]');
+    if(el){ void el.offsetHeight; requestAnimationFrame(function(){ el.classList.add('acc-open'); }); }
+  }
+  if(PENDING_CLOSE_KEY){
+    var key2 = PENDING_CLOSE_KEY;
+    var el2 = document.querySelector('[data-acc-key="'+key2+'"]');
+    if(el2){ void el2.offsetHeight; requestAnimationFrame(function(){ el2.classList.remove('acc-open'); }); }
+    setTimeout(function(){ if(PENDING_CLOSE_KEY===key2) PENDING_CLOSE_KEY=null; render(); }, 260);
+  }
+}
 
 var DIAS_SEMANA = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
 var MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -299,6 +343,7 @@ function render(){
   updateSyncPill();
   bindEvents();
   if(UI.drawerId || UI.drawerCreate) renderDrawer();
+  syncAccordionAnimations();
 }
 
 function viewDashboard(dateLabel){
@@ -499,6 +544,42 @@ function viewAlunos(){
     '</tr>';
   }).join('') || '<tr><td colspan="7"><div class="empty-state">Nenhum bolsista encontrado com esses filtros.</div></td></tr>';
 
+  var accCards = list.map(function(s){
+    var incompleto = !s.bolsa || !s.diasTrabalho;
+    var key = 'alunoAberto:'+s.id;
+    var open = UI.alunoAberto===s.id;
+    var panel = '';
+    if(accordionShouldRender('alunoAberto', s.id)){
+      panel =
+        '<div class="'+accordionPanelClass('alunoAberto', s.id)+'" data-acc-key="'+key+'">' +
+          '<div class="acc-panel-inner">' +
+            '<div class="kv-grid">' +
+              '<div class="kv"><span class="k">Setor</span><span class="v">'+esc(setorNome(s.setor))+'</span></div>' +
+              '<div class="kv"><span class="k">Nível</span><span class="v">'+nivelLabel(s.nivel)+'</span></div>' +
+              '<div class="kv"><span class="k">Carga</span><span class="v mono">'+horasSemanaLabel(s)+'</span></div>' +
+              '<div class="kv"><span class="k">Dias de trabalho</span><span class="v">'+esc(s.diasTrabalho||'—')+'</span></div>' +
+              '<div class="kv"><span class="k">Hoje</span><span class="v">'+statusHojePill(s.id)+'</span></div>' +
+              '<div class="kv"><span class="k">Pendência herdada</span><span class="v">'+pill(s.pendenteHerdada)+'</span></div>' +
+            '</div>' +
+            '<button class="btn btn-sm btn-primary" data-open="'+s.id+'" type="button">Ver perfil completo</button>' +
+          '</div>' +
+        '</div>';
+    }
+    return (
+      '<div class="aluno-acc">' +
+        '<button class="aluno-acc-head'+(open?' open':'')+'" data-toggle-aluno="'+s.id+'" type="button" aria-expanded="'+(open?'true':'false')+'">' +
+          '<span class="avatar">'+initials(s.nome)+'</span>' +
+          '<span class="aluno-acc-info">' +
+            '<span class="aluno-acc-name">'+esc(s.nome)+(incompleto?' <span class="tag" title="Dados incompletos na planilha original">incompleto</span>':'')+'</span>' +
+            '<span class="aluno-acc-sub">RA '+esc(s.ra||'—')+' · '+pill(s.pendenteHerdada)+'</span>' +
+          '</span>' +
+          '<span class="chev">›</span>' +
+        '</button>' +
+        panel +
+      '</div>'
+    );
+  }).join('') || '<div class="empty-state">Nenhum bolsista encontrado com esses filtros.</div>';
+
   return (
     '<div class="view-head"><div><h1>Alunos</h1><div class="view-sub">'+STATE.students.length+' bolsistas cadastrados. Clique em um nome para ver o perfil completo.</div></div>' +
       '<div class="toolbar" style="gap:8px;">' +
@@ -516,17 +597,35 @@ function viewAlunos(){
       '</select>' +
     '</div>' +
 
-    '<div class="card"><div class="card-body tight"><div class="table-wrap"><table>' +
+    '<div class="card alunos-table-card"><div class="card-body tight"><div class="table-wrap"><table>' +
       '<thead><tr><th>Bolsista</th><th>Setor</th><th>Nível</th><th class="num">Carga</th><th>Dias de trabalho</th><th>Hoje</th><th>Pendência herdada</th></tr></thead>' +
       '<tbody>'+rows+'</tbody>' +
-    '</table></div></div></div>'
+    '</table></div></div></div>' +
+
+    '<div class="aluno-acc-list">'+accCards+'</div>'
   );
 }
 
-function punchButton(id){
-  var s = studentById(id);
-  if(!s) return '<div class="empty-state">Selecione um bolsista na lista ao lado.</div>';
-  if(isConservacao(s)) return punchButtonTurno(s);
+function turnosHojeCount(id){
+  return registrosDoAluno(id).filter(function(r){ return r.tipo==='saida' && sameDay(r.ts); }).length;
+}
+
+/* Núcleo compartilhado entre o painel desktop (punchButton) e o
+   acordeão inline mobile (punchButtonInline) — status/ações/dica. */
+function punchActionsBlock(s){
+  var id = s.id;
+  var minsHoje = minutosTrabalhados(id, todayKey()+'T00:00:00.000Z');
+  if(isConservacao(s)){
+    var n = turnosHojeCount(id);
+    var statusTurno = n>0 ? (n===1 ? '1 turno registrado hoje.' : n+' turnos registrados hoje.') : 'Nenhum turno registrado hoje.';
+    return {
+      status: statusTurno,
+      warn: '',
+      actions: '<button class="btn btn-lg btn-primary" data-punch-turno data-id="'+id+'">Marcar turno cumprido (+4h)</button>',
+      minsHoje: minsHoje,
+      hint: 'Pode apertar mais de uma vez no mesmo dia — por exemplo, um turno pela manhã e outro à noite. Cada toque soma 4 horas.'
+    };
+  }
   var last = ultimoRegistro(id);
   var next = proximoTipo(id);
   var statusText, warn = '';
@@ -537,45 +636,45 @@ function punchButton(id){
   } else {
     statusText = sameDay(last.ts) ? ('Saiu às ' + fmtTime(last.ts) + '. Pode registrar nova chegada se voltar hoje.') : 'Ainda não bateu o ponto hoje.';
   }
-  var minsHoje = minutosTrabalhados(id, todayKey()+'T00:00:00.000Z');
-  return (
-    '<div class="punch-status">' +
-      '<span class="avatar" style="width:44px;height:44px;font-size:15px;">'+initials(s.nome)+'</span>' +
-      '<span class="who">'+esc(s.nome)+'</span>' +
-      '<span class="state">'+esc(setorNome(s.setor))+' · '+nivelLabel(s.nivel)+'</span>' +
-      '<span class="state">'+statusText+'</span>' +
-    '</div>' +
-    warn +
-    '<div class="punch-actions">' +
+  return {
+    status: statusText,
+    warn: warn,
+    actions:
       '<button class="btn btn-lg btn-primary" data-punch="entrada" data-id="'+id+'" '+(next!=='entrada'?'disabled':'')+'>Marcar chegada agora</button>' +
-      '<button class="btn btn-lg" data-punch="saida" data-id="'+id+'" '+(next!=='saida'?'disabled':'')+'>Marcar saída agora</button>' +
-    '</div>' +
-    '<div class="punch-time-row">Horas cumpridas hoje: <span class="mono">&nbsp;'+fmtHoras(minsHoje)+'</span></div>' +
-    '<div class="view-sub">Esqueceu de bater o ponto num horário certo? Peça o ajuste na aba <b>Pedidos de ajuste</b> — os responsáveis do setor aprovam antes de valer.</div>'
-  );
+      '<button class="btn btn-lg" data-punch="saida" data-id="'+id+'" '+(next!=='saida'?'disabled':'')+'>Marcar saída agora</button>',
+    minsHoje: minsHoje,
+    hint: 'Esqueceu de bater o ponto num horário certo? Peça o ajuste na aba <b>Pedidos de ajuste</b> — os responsáveis do setor aprovam antes de valer.'
+  };
 }
 
-function turnosHojeCount(id){
-  return registrosDoAluno(id).filter(function(r){ return r.tipo==='saida' && sameDay(r.ts); }).length;
-}
-
-function punchButtonTurno(s){
-  var id = s.id;
-  var minsHoje = minutosTrabalhados(id, todayKey()+'T00:00:00.000Z');
-  var n = turnosHojeCount(id);
-  var statusText = n>0 ? (n===1 ? '1 turno registrado hoje.' : n+' turnos registrados hoje.') : 'Nenhum turno registrado hoje.';
+/* Painel completo (desktop, coluna lateral da aba Ponto) */
+function punchButton(id){
+  var s = studentById(id);
+  if(!s) return '<div class="empty-state">Selecione um bolsista na lista ao lado.</div>';
+  var b = punchActionsBlock(s);
   return (
     '<div class="punch-status">' +
       '<span class="avatar" style="width:44px;height:44px;font-size:15px;">'+initials(s.nome)+'</span>' +
       '<span class="who">'+esc(s.nome)+'</span>' +
       '<span class="state">'+esc(s.setorNome || setorNome(s.setor))+' · '+nivelLabel(s.nivel)+'</span>' +
-      '<span class="state">'+statusText+'</span>' +
+      '<span class="state">'+b.status+'</span>' +
     '</div>' +
-    '<div class="punch-actions">' +
-      '<button class="btn btn-lg btn-primary" data-punch-turno data-id="'+id+'">Marcar turno cumprido (+4h)</button>' +
-    '</div>' +
-    '<div class="punch-time-row">Horas cumpridas hoje: <span class="mono">&nbsp;'+fmtHoras(minsHoje)+'</span></div>' +
-    '<div class="view-sub">Pode apertar mais de uma vez no mesmo dia — por exemplo, um turno pela manhã e outro à noite. Cada toque soma 4 horas.</div>'
+    b.warn +
+    '<div class="punch-actions">'+b.actions+'</div>' +
+    '<div class="punch-time-row">Horas cumpridas hoje: <span class="mono">&nbsp;'+fmtHoras(b.minsHoje)+'</span></div>' +
+    '<div class="view-sub">'+b.hint+'</div>'
+  );
+}
+
+/* Versão enxuta (mobile, acordeão inline logo abaixo do nome na lista —
+   sem cabeçalho de avatar/nome, que já aparece no item da lista) */
+function punchButtonInline(s){
+  var b = punchActionsBlock(s);
+  return (
+    '<div class="punch-inline-status">'+b.status+'</div>' +
+    b.warn +
+    '<div class="punch-actions">'+b.actions+'</div>' +
+    '<div class="punch-time-row">Horas cumpridas hoje: <span class="mono">&nbsp;'+fmtHoras(b.minsHoje)+'</span></div>'
   );
 }
 
@@ -596,11 +695,26 @@ function viewPonto(){
   }).join('');
 
   var listHtml = pool.map(function(s){
-    return '<div class="punch-item'+(UI.punchSelected===s.id?' selected':'')+'" data-select-punch="'+s.id+'">' +
-      '<span class="avatar">'+initials(s.nome)+'</span>' +
-      '<span class="name">'+esc(s.nome)+'</span>' +
-      statusHojePill(s.id) +
-    '</div>';
+    var key = 'punchSelected:'+s.id;
+    var selected = UI.punchSelected===s.id;
+    var inline = '';
+    if(accordionShouldRender('punchSelected', s.id)){
+      inline =
+        '<div class="punch-inline-acc '+accordionPanelClass('punchSelected', s.id)+'" data-acc-key="'+key+'">' +
+          '<div class="acc-panel-inner">'+punchButtonInline(s)+'</div>' +
+        '</div>';
+    }
+    return (
+      '<div>' +
+        '<button class="punch-item'+(selected?' selected':'')+'" data-select-punch="'+s.id+'" type="button" aria-expanded="'+(selected?'true':'false')+'">' +
+          '<span class="avatar">'+initials(s.nome)+'</span>' +
+          '<span class="name">'+esc(s.nome)+'</span>' +
+          statusHojePill(s.id) +
+          '<span class="chev">›</span>' +
+        '</button>' +
+        inline +
+      '</div>'
+    );
   }).join('') || '<div class="empty-state">Nenhum bolsista nesse filtro.</div>';
 
   return (
@@ -621,7 +735,7 @@ function viewPonto(){
           '<div class="punch-list">'+listHtml+'</div>' +
         '</div>' +
       '</div>' +
-      '<div class="card"><div class="card-body punch-detail">'+punchButton(UI.punchSelected)+'</div></div>' +
+      '<div class="card punch-detail-card"><div class="card-body punch-detail">'+punchButton(UI.punchSelected)+'</div></div>' +
     '</div>'
   );
 }
@@ -906,6 +1020,9 @@ function bindEvents(){
   $all('[data-open]').forEach(function(tr){
     tr.addEventListener('click', function(){ UI.drawerId = tr.getAttribute('data-open'); UI.drawerCreate=false; UI.drawerEdit = false; renderDrawer(); });
   });
+  $all('[data-toggle-aluno]').forEach(function(btn){
+    btn.addEventListener('click', function(){ toggleAccordion('alunoAberto', btn.getAttribute('data-toggle-aluno')); render(); });
+  });
 
   // Ponto view
   $all('[data-punchmode]').forEach(function(btn){
@@ -916,7 +1033,7 @@ function bindEvents(){
   var punchBusca = $('#punch-busca');
   if(punchBusca) punchBusca.addEventListener('input', function(){ UI.punchSearch = punchBusca.value; render(); preserveFocus('#punch-busca'); });
   $all('[data-select-punch]').forEach(function(item){
-    item.addEventListener('click', function(){ UI.punchSelected = item.getAttribute('data-select-punch'); render(); });
+    item.addEventListener('click', function(){ toggleAccordion('punchSelected', item.getAttribute('data-select-punch')); render(); });
   });
   $all('[data-punch]').forEach(function(btn){
     btn.addEventListener('click', function(){
