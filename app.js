@@ -332,6 +332,97 @@ function statusHojePill(id){
   return '<span class="pill pill-muted">Sem registro hoje</span>';
 }
 
+function statusHojeTexto(id){
+  var last = ultimoRegistro(id);
+  if(!last) return 'Sem registro hoje';
+  if(last.tipo==='entrada'){
+    if(sameDay(last.ts)) return 'Em andamento desde ' + fmtTime(last.ts);
+    return 'Em andamento desde ' + fmtDateTime(last.ts) + ' (dia anterior)';
+  }
+  if(sameDay(last.ts)) return 'Saiu às ' + fmtTime(last.ts);
+  return 'Sem registro hoje';
+}
+
+/* ============================================================
+   Exportação para Excel (SheetJS, carregado via CDN no index.html)
+   ============================================================ */
+function exportarExcel(){
+  if(typeof XLSX === 'undefined'){
+    toast('Não foi possível carregar a biblioteca de exportação. Verifique sua conexão e tente novamente.', 'err');
+    return;
+  }
+  var wb = XLSX.utils.book_new();
+
+  var alunosOrdenados = STATE.students.slice().sort(function(a,b){ return a.nome.localeCompare(b.nome,'pt-BR'); });
+  var alunosData = alunosOrdenados.map(function(s){
+    return {
+      'Nome': s.nome,
+      'RA': s.ra || '',
+      'Setor': setorNome(s.setor),
+      'Nível': nivelLabel(s.nivel),
+      'Bolsa': s.bolsa || '',
+      'Carga horária (h/sem)': (s.horasSemana===null || s.horasSemana===undefined) ? '' : s.horasSemana,
+      'Dias de trabalho': s.diasTrabalho || '',
+      'Telefone': s.telefone || '',
+      'Aniversário': s.aniversario ? fmtDateBR(s.aniversario) : '',
+      'Curso': s.curso || '',
+      'Pendência herdada (planilha)': s.pendenteHerdada || '',
+      'Horas no sistema': fmtHoras(minutosTrabalhados(s.id)),
+      'Pontos': pontosDoAluno(s.id),
+      'Status hoje': statusHojeTexto(s.id),
+      'Ativo': s.ativo ? 'Sim' : 'Não',
+      'Observações': s.observacao || ''
+    };
+  });
+  var wsAlunos = XLSX.utils.json_to_sheet(alunosData);
+  wsAlunos['!cols'] = [{wch:28},{wch:12},{wch:16},{wch:14},{wch:10},{wch:14},{wch:16},{wch:14},{wch:12},{wch:22},{wch:20},{wch:16},{wch:8},{wch:24},{wch:8},{wch:30}];
+  XLSX.utils.book_append_sheet(wb, wsAlunos, 'Alunos');
+
+  var registrosData = STATE.registros.slice().sort(function(a,b){ return new Date(a.ts) - new Date(b.ts); }).map(function(r){
+    var s = studentById(r.studentId);
+    return {
+      'Aluno': s ? s.nome : '(removido)',
+      'Setor': s ? setorNome(s.setor) : '',
+      'Tipo': r.tipo==='entrada' ? 'Chegada' : 'Saída',
+      'Data': r.ts ? fmtDateBR(r.ts.slice(0,10)) : '',
+      'Hora': fmtTime(r.ts),
+      'Origem': r.origem || ''
+    };
+  });
+  var wsRegistros = XLSX.utils.json_to_sheet(registrosData);
+  wsRegistros['!cols'] = [{wch:28},{wch:16},{wch:10},{wch:12},{wch:8},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, wsRegistros, 'Registros de ponto');
+
+  var pedidosData = STATE.pedidos.slice().sort(function(a,b){ return new Date(a.criadoEm) - new Date(b.criadoEm); }).map(function(p){
+    var s = studentById(p.studentId);
+    return {
+      'Aluno': s ? s.nome : '(removido)',
+      'Setor': s ? setorNome(s.setor) : '',
+      'Data do ajuste': fmtDateBR(p.data),
+      'Tipo': p.tipoAlvo==='entrada' ? 'Chegada' : 'Saída',
+      'Horário': p.horario || '',
+      'Motivo': p.motivo || '',
+      'Status': p.status==='pendente' ? 'Pendente' : p.status==='aprovado' ? 'Aprovado' : 'Rejeitado',
+      'Criado em': fmtDateTime(p.criadoEm),
+      'Resolvido em': p.resolvidoEm ? fmtDateTime(p.resolvidoEm) : '',
+      'Resolvido por': p.resolvidoPor || ''
+    };
+  });
+  var wsPedidos = XLSX.utils.json_to_sheet(pedidosData);
+  wsPedidos['!cols'] = [{wch:28},{wch:16},{wch:14},{wch:10},{wch:10},{wch:32},{wch:12},{wch:16},{wch:16},{wch:18}];
+  XLSX.utils.book_append_sheet(wb, wsPedidos, 'Pedidos de ajuste');
+
+  var filename = 'trabalho-educativo-' + todayKey() + '.xlsx';
+  try{
+    XLSX.writeFile(wb, filename);
+    logAtividade('Exportou os dados para Excel ('+filename+').');
+    toast('Excel gerado: '+filename);
+    persist();
+  }catch(err){
+    toast('Não foi possível gerar o Excel agora.', 'err');
+  }
+}
+
 function viewAlunos(){
   var setorOpts = '<option value="todos">Todos os setores</option>' + STATE.setores.map(function(s){
     return '<option value="'+s.id+'"'+(UI.alunoFiltroSetor===s.id?' selected':'')+'>'+esc(s.nome)+'</option>';
@@ -362,7 +453,10 @@ function viewAlunos(){
 
   return (
     '<div class="view-head"><div><h1>Alunos</h1><div class="view-sub">'+STATE.students.length+' bolsistas cadastrados. Clique em um nome para ver o perfil completo.</div></div>' +
-      '<button class="btn btn-primary" data-action="novo-aluno">+ Novo aluno</button></div>' +
+      '<div class="toolbar" style="gap:8px;">' +
+        '<button class="btn btn-ghost" data-action="exportar-excel">⇩ Exportar Excel</button>' +
+        '<button class="btn btn-primary" data-action="novo-aluno">+ Novo aluno</button>' +
+      '</div></div>' +
 
     '<div class="toolbar">' +
       '<div class="search"><input type="text" id="busca-aluno" placeholder="Buscar por nome ou RA…" value="'+esc(UI.alunoBusca)+'"></div>' +
@@ -540,6 +634,7 @@ function viewConfig(){
       '<button data-configtab="bolsas" class="'+(UI.configTab==='bolsas'?'active':'')+'">Códigos de bolsa</button>' +
       '<button data-configtab="lideres" class="'+(UI.configTab==='lideres'?'active':'')+'">Responsáveis por setor</button>' +
       '<button data-configtab="pontos" class="'+(UI.configTab==='pontos'?'active':'')+'">Pontuação</button>' +
+      '<button data-configtab="exportar" class="'+(UI.configTab==='exportar'?'active':'')+'">Exportar dados</button>' +
     '</div>' +
 
     (UI.configTab==='bolsas' ?
@@ -558,6 +653,18 @@ function viewConfig(){
       '<div class="card"><div class="card-head"><h2>Conversão de pontos</h2></div><div class="card-body">' +
       '<label style="max-width:260px;">Pontos por hora trabalhada<input type="number" min="0" step="0.5" id="input-pontos-hora" value="'+STATE.pontosPorHora+'"></label>' +
       '<p class="view-sub" style="margin-top:10px;">Cada hora completa registrada (chegada + saída confirmadas) vale essa quantidade de pontos no perfil do aluno. Ajuste aqui se a regra de pontuação mudar.</p>' +
+      '</div></div>'
+      : '') +
+
+    (UI.configTab==='exportar' ?
+      '<div class="card"><div class="card-head"><h2>Exportar para Excel</h2><span class="meta">gera um arquivo .xlsx com 3 planilhas</span></div><div class="card-body">' +
+      '<p class="view-sub">O arquivo baixado traz três planilhas com todos os dados atuais do sistema:</p>' +
+      '<ul style="margin:10px 0 18px 18px;font-size:13px;color:var(--ink-soft);display:flex;flex-direction:column;gap:4px;">' +
+        '<li><b>Alunos</b> — cadastro completo, setor, nível, bolsa, carga horária, horas cumpridas, pontos e status de hoje.</li>' +
+        '<li><b>Registros de ponto</b> — todas as chegadas e saídas já registradas no sistema.</li>' +
+        '<li><b>Pedidos de ajuste</b> — histórico de pedidos, com status e quem aprovou ou rejeitou.</li>' +
+      '</ul>' +
+      '<button class="btn btn-primary" data-action="exportar-excel">⇩ Baixar Excel (.xlsx)</button>' +
       '</div></div>'
       : '')
   );
@@ -719,6 +826,9 @@ function bindEvents(){
   if(fNivel) fNivel.addEventListener('change', function(){ UI.alunoFiltroNivel = fNivel.value; render(); });
   var novoAlunoBtn = $('[data-action="novo-aluno"]');
   if(novoAlunoBtn) novoAlunoBtn.addEventListener('click', function(){ UI.drawerCreate = true; UI.drawerId = null; UI.drawerEdit = false; renderDrawer(); });
+  $all('[data-action="exportar-excel"]').forEach(function(btn){
+    btn.addEventListener('click', function(){ exportarExcel(); });
+  });
   $all('[data-open]').forEach(function(tr){
     tr.addEventListener('click', function(){ UI.drawerId = tr.getAttribute('data-open'); UI.drawerCreate=false; UI.drawerEdit = false; renderDrawer(); });
   });
