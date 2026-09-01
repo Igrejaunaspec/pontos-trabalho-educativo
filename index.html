@@ -18,6 +18,19 @@
     <label>Senha<input type="password" name="password" required autocomplete="current-password"></label>
     <div class="login-error" id="login-error" hidden></div>
     <button class="btn btn-primary" type="submit">Entrar</button>
+    <div class="login-switch">Aluno da faculdade e ainda não tem login? <a href="#" id="show-signup">Cadastre-se com seu RA</a></div>
+  </form>
+
+  <form id="signup-form" class="login-card" hidden>
+    <div class="login-brand">Trabalho Educativo</div>
+    <div class="login-sub">Criar seu login (bolsista da faculdade)</div>
+    <label>RA (matrícula)<input type="text" name="ra" required autocomplete="off" inputmode="numeric"></label>
+    <label>E-mail<input type="email" name="email" required autocomplete="username"></label>
+    <label>Senha<input type="password" name="password" required minlength="6" autocomplete="new-password"></label>
+    <label>Confirmar senha<input type="password" name="password2" required minlength="6" autocomplete="new-password"></label>
+    <div class="login-error" id="signup-error" hidden></div>
+    <button class="btn btn-primary" type="submit">Criar login</button>
+    <div class="login-switch">Já tem login? <a href="#" id="show-login">Entrar</a></div>
   </form>
 </div>
 

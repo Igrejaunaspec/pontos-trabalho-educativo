@@ -8,7 +8,8 @@
    ============================================================ */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
-  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence,
+  createUserWithEmailAndPassword, deleteUser
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
   getFirestore, doc, setDoc, updateDoc, getDoc, onSnapshot, collection, query, where, writeBatch
@@ -32,6 +33,10 @@ var STATE_DOC = doc(db, "app", "state");
 
 var booted = false;
 var lastSentJSON = null;
+// true durante o fluxo de cadastro (entre createUserWithEmailAndPassword e o
+// commit do vínculo em alunoAuth/alunoClaimed) — evita que onAuthStateChanged
+// trate o novo usuário como "sem vínculo" antes da hora, numa corrida.
+var suppressAuthHandling = false;
 
 // listeners ativos (para poder cancelar ao trocar de papel / deslogar)
 var unsubAdminState = null;
@@ -45,12 +50,26 @@ var loginScreen = document.getElementById('login-screen');
 var appRoot = document.getElementById('app');
 var loginForm = document.getElementById('login-form');
 var loginError = document.getElementById('login-error');
+var signupForm = document.getElementById('signup-form');
+var signupError = document.getElementById('signup-error');
+var showSignupLink = document.getElementById('show-signup');
+var showLoginLink = document.getElementById('show-login');
 
 function showLogin(msg){
   loginScreen.hidden = false;
   appRoot.hidden = true;
+  loginForm.hidden = false;
+  signupForm.hidden = true;
   if(msg){ loginError.textContent = msg; loginError.hidden = false; }
   else { loginError.hidden = true; }
+}
+function showSignupScreen(msg){
+  loginScreen.hidden = false;
+  appRoot.hidden = true;
+  loginForm.hidden = true;
+  signupForm.hidden = false;
+  if(msg){ signupError.textContent = msg; signupError.hidden = false; }
+  else { signupError.hidden = true; }
 }
 function showApp(){
   loginScreen.hidden = true;
@@ -69,6 +88,85 @@ loginForm.addEventListener('submit', function(e){
   loginError.hidden = true;
   signInWithEmailAndPassword(auth, email, password).catch(function(err){
     showLogin('E-mail ou senha incorretos.');
+  }).finally(function(){
+    btn.disabled = false;
+  });
+});
+
+if(showSignupLink) showSignupLink.addEventListener('click', function(e){
+  e.preventDefault();
+  showSignupScreen();
+});
+if(showLoginLink) showLoginLink.addEventListener('click', function(e){
+  e.preventDefault();
+  showLogin();
+});
+
+/* ============================================================
+   Cadastro do próprio aluno (faculdade) — usa o RA para achar o
+   cadastro certo em "alunoRA/{ra}" e reivindica esse aluno de
+   forma exclusiva via "alunoClaimed/{studentId}" (regra garante
+   que só o primeiro a reivindicar consegue vincular o login).
+   ============================================================ */
+signupForm.addEventListener('submit', function(e){
+  e.preventDefault();
+  var fd = new FormData(signupForm);
+  var ra = (fd.get('ra') || '').trim();
+  var email = (fd.get('email') || '').trim();
+  var password = fd.get('password') || '';
+  var password2 = fd.get('password2') || '';
+  var btn = signupForm.querySelector('button[type="submit"]');
+
+  if(!ra){ showSignupScreen('Informe seu RA.'); return; }
+  if(password.length < 6){ showSignupScreen('A senha precisa ter pelo menos 6 caracteres.'); return; }
+  if(password !== password2){ showSignupScreen('As senhas não coincidem.'); return; }
+
+  btn.disabled = true;
+  signupError.hidden = true;
+  suppressAuthHandling = true; // segura o onAuthStateChanged até o vínculo terminar
+
+  var createdUser = null;
+
+  // Precisa criar a conta primeiro: a regra de "alunoRA" exige usuário
+  // autenticado para leitura, então o RA só pode ser conferido depois.
+  createUserWithEmailAndPassword(auth, email, password).then(function(cred){
+    createdUser = cred.user;
+    return getDoc(doc(db, 'alunoRA', ra));
+  }).then(function(raSnap){
+    if(!raSnap.exists()){
+      throw {code: 'pontos/ra-nao-encontrado'};
+    }
+    var studentId = raSnap.data().studentId;
+    // Duas escritas sequenciais (não um batch): a regra de "alunoAuth"
+    // confere a reivindicação em "alunoClaimed" via get(), e isso só
+    // enxerga escritas já confirmadas — não outras do mesmo batch.
+    return setDoc(doc(db, 'alunoClaimed', studentId), {uid: createdUser.uid, claimadoEm: new Date().toISOString()})
+      .then(function(){
+        return setDoc(doc(db, 'alunoAuth', createdUser.uid), {studentId: studentId});
+      });
+  }).then(function(){
+    signupForm.reset();
+    suppressAuthHandling = false;
+    if(auth.currentUser){ handleUserSignedIn(auth.currentUser); }
+  }).catch(function(err){
+    var msg = 'Não foi possível criar seu login agora. Tente novamente.';
+    if(err && err.code === 'pontos/ra-nao-encontrado'){
+      msg = 'RA não encontrado. Verifique o número ou fale com a administração.';
+    } else if(err && err.code === 'auth/email-already-in-use'){
+      msg = 'Este e-mail já está em uso. Tente entrar, ou use outro e-mail.';
+    } else if(err && err.code === 'auth/weak-password'){
+      msg = 'Senha muito fraca. Use pelo menos 6 caracteres.';
+    } else if(err && err.code === 'auth/invalid-email'){
+      msg = 'E-mail inválido.';
+    } else if(err && (err.code === 'permission-denied' || (err.message||'').indexOf('permission') !== -1)){
+      msg = 'Este RA já tem um login cadastrado. Fale com a administração se isso não deveria acontecer.';
+    }
+    // se a conta de auth chegou a ser criada mas o vínculo falhou, desfaz para não deixar login órfão
+    var cleanup = createdUser ? deleteUser(createdUser).catch(function(){ /* melhor esforço */ }) : Promise.resolve();
+    return cleanup.then(function(){
+      suppressAuthHandling = false;
+      showSignupScreen(msg);
+    });
   }).finally(function(){
     btn.disabled = false;
   });
@@ -125,6 +223,7 @@ function startListeningAdmin(){
   var lastDocData = null;
   var lastRegistros = [];
   var lastPedidos = [];
+  var alunoRASynced = false;
 
   function emit(){
     if(lastDocData===null) return;
@@ -134,6 +233,10 @@ function startListeningAdmin(){
       window.__pontosBoot(merged);
     } else {
       window.__pontosApplyRemote(merged);
+    }
+    if(!alunoRASynced){
+      alunoRASynced = true;
+      syncAlunoRA(merged.students || []);
     }
   }
 
@@ -158,6 +261,21 @@ function startListeningAdmin(){
     lastPedidos = snap.docs.map(function(d){ return d.data(); });
     emit();
   }, function(err){ console.error('[pontos] pedidos snapshot error', err); });
+}
+
+/* Mantém "alunoRA/{ra}" -> {studentId} em dia para os bolsistas da
+   faculdade (ativos), para permitir o auto-cadastro por RA. Roda uma
+   vez por sessão do admin logado — escrita idempotente, barata. */
+function syncAlunoRA(students){
+  var elegiveis = (students || []).filter(function(s){
+    return s && s.ativo && s.nivel === 'FAC' && s.ra;
+  });
+  if(!elegiveis.length) return;
+  var batch = writeBatch(db);
+  elegiveis.forEach(function(s){
+    batch.set(doc(db, 'alunoRA', String(s.ra)), {studentId: s.id});
+  });
+  batch.commit().catch(function(err){ console.error('[pontos] falha ao sincronizar alunoRA', err); });
 }
 
 function seedInitialState(){
@@ -223,17 +341,22 @@ function startListeningAluno(uid){
   });
 }
 
+function handleUserSignedIn(user){
+  showApp();
+  if(!appRoot.hasChildNodes()){
+    appRoot.innerHTML = '<div class="login-loading">Carregando dados…</div>';
+  }
+  if(user.email === ADMIN_EMAIL){
+    startListeningAdmin();
+  } else {
+    startListeningAluno(user.uid);
+  }
+}
+
 onAuthStateChanged(auth, function(user){
+  if(suppressAuthHandling) return; // fluxo de cadastro em andamento — ele decide quando prosseguir
   if(user){
-    showApp();
-    if(!appRoot.hasChildNodes()){
-      appRoot.innerHTML = '<div class="login-loading">Carregando dados…</div>';
-    }
-    if(user.email === ADMIN_EMAIL){
-      startListeningAdmin();
-    } else {
-      startListeningAluno(user.uid);
-    }
+    handleUserSignedIn(user);
   } else {
     stopAllListeners();
     booted = false;
