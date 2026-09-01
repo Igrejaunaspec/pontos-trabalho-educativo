@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trabalho Educativo — Pontos &amp; Presença</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="login-screen" class="login-screen">
+  <form id="login-form" class="login-card">
+    <div class="login-brand">Trabalho Educativo</div>
+    <div class="login-sub">Pontos &amp; presença — acesso restrito à administração</div>
+    <label>E-mail<input type="email" name="email" required autocomplete="username"></label>
+    <label>Senha<input type="password" name="password" required autocomplete="current-password"></label>
+    <div class="login-error" id="login-error" hidden></div>
+    <button class="btn btn-primary" type="submit">Entrar</button>
+  </form>
+</div>
+
+<div id="app" hidden></div>
+<div class="toast-stack" id="toast-stack"></div>
+
+<script src="app.js"></script>
+<script type="module" src="firebase-init.js"></script>
+</body>
+</html>
