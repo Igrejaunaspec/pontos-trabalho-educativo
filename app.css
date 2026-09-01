@@ -88,6 +88,7 @@ button{font-family:inherit;}
 
 /* ---------- App shell ---------- */
 #app{min-height:100vh;display:flex;}
+#app[hidden]{display:none;}
 
 .sidebar{
   width:236px;
@@ -348,6 +349,7 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
   min-height:100vh;display:flex;align-items:center;justify-content:center;
   padding:24px;background:var(--bg);
 }
+.login-screen[hidden]{display:none;}
 .login-card{
   width:100%;max-width:360px;display:flex;flex-direction:column;gap:14px;
   background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
