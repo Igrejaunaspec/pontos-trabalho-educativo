@@ -476,9 +476,18 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
 .toast{
   background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:var(--radius-sm);font-size:13px;
   box-shadow:var(--shadow-lg);animation:toast-in .25s ease-in-out;max-width:320px;
+  display:flex;align-items:center;gap:12px;
 }
 .toast.warn{background:var(--warning);color:#241a02;}
 .toast.err{background:var(--critical);color:#2a0e08;}
+.toast-msg{flex:1;}
+.toast-actionable{max-width:360px;}
+.toast-action{
+  flex:0 0 auto;background:transparent;border:1px solid currentColor;color:inherit;
+  padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;
+  white-space:nowrap;
+}
+.toast-action:hover{background:rgba(255,255,255,.15);}
 @keyframes toast-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
 
 .banner{

@@ -253,6 +253,9 @@ window.__pontosSaveState = function(state){
 window.__pontosAddRegistro = function(rec){
   return setDoc(doc(db, 'registros', rec.id), rec);
 };
+window.__pontosDeleteRegistro = function(id){
+  return deleteDoc(doc(db, 'registros', id));
+};
 window.__pontosAddPedido = function(rec){
   return setDoc(doc(db, 'pedidos', rec.id), rec);
 };

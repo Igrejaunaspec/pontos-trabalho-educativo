@@ -134,6 +134,7 @@ function fmtDateBR(iso){
 function fmtHoras(mins){
   if(!mins || mins<=0) return '0h';
   var h = Math.floor(mins/60), m = Math.round(mins%60);
+  if(m===60){ h += 1; m = 0; } // arredondamento de ponto flutuante (ex.: 239.999min)
   return m>0 ? (h+'h'+pad2(m)) : (h+'h');
 }
 function initials(nome){
@@ -187,15 +188,23 @@ function proximoTipo(id){
 }
 function minutosTrabalhados(id, sinceISO){
   var list = registrosDoAluno(id);
-  var total = 0, abertura = null;
+  var total = 0;
+  // Pilha (não uma única variável) — necessário porque um aluno pode ter
+  // mais de um turno no mesmo dia (ex.: "Marcar turno cumprido (+4h)" duas
+  // vezes, manhã e noite). Como o registro de turno grava a saída bem
+  // depois da chegada, a entrada do 2º turno acaba, em ordem cronológica
+  // bruta, ANTES da saída do 1º — uma única variável "aberta" perdia essa
+  // entrada e descartava a soma. A pilha soma corretamente em qualquer
+  // ordem de entradas/saídas, desde que o total de entradas e saídas bata.
+  var pilha = [];
   for(var i=0;i<list.length;i++){
     var r = list[i];
     if(sinceISO && r.ts < sinceISO) continue;
     if(r.tipo === 'entrada'){
-      abertura = r.ts;
-    } else if(r.tipo === 'saida' && abertura){
+      pilha.push(r.ts);
+    } else if(r.tipo === 'saida' && pilha.length){
+      var abertura = pilha.pop();
       total += (new Date(r.ts) - new Date(abertura)) / 60000;
-      abertura = null;
     }
   }
   return total;
@@ -228,6 +237,12 @@ function addRegistro(rec){
   STATE.registros.push(rec);
   if(typeof window.__pontosAddRegistro === 'function') window.__pontosAddRegistro(rec);
 }
+/* Desfazer um registro de ponto (usado pelo botão "Desfazer" que aparece
+   logo depois de bater o ponto por engano). */
+function removeRegistro(id){
+  STATE.registros = STATE.registros.filter(function(r){ return r.id !== id; });
+  if(typeof window.__pontosDeleteRegistro === 'function') window.__pontosDeleteRegistro(id);
+}
 function addPedido(rec){
   STATE.pedidos.push(rec);
   if(typeof window.__pontosAddPedido === 'function') window.__pontosAddPedido(rec);
@@ -250,17 +265,59 @@ function mondayDaSemanaISO(){
   return d.toISOString();
 }
 
+/* Saldo de horas da semana atual (desde a última segunda) contra a carga
+   horária cadastrada — usado tanto no perfil do próprio aluno quanto na
+   lista de Alunos (coluna "Saldo da semana", no lugar da antiga pendência
+   herdada da planilha). Só o cálculo é compartilhado; cada tela escolhe
+   sua própria frase a partir de "saldo"/"cls". */
+function saldoSemanaInfo(s){
+  var minsSemana = minutosTrabalhados(s.id, mondayDaSemanaISO());
+  var metaSemana = (s.horasSemana||0) * 60;
+  var saldo = minsSemana - metaSemana;
+  if(!s.horasSemana){
+    return {saldo: null, cls: 'pill-muted'};
+  }
+  return {saldo: saldo, cls: saldo>=0 ? 'pill-ok' : 'pill-crit'};
+}
+/* Versão compacta para a lista/tabela de Alunos: mostra em destaque quantas
+   horas negativas (devendo) faltam cumprir esta semana. */
+function saldoPill(s){
+  var info = saldoSemanaInfo(s);
+  var txt = info.saldo===null ? 'Carga não definida'
+    : info.saldo<0 ? fmtHoras(-info.saldo)+' devendo esta semana'
+    : info.saldo>0 ? '+'+fmtHoras(info.saldo)+' esta semana'
+    : 'Em dia esta semana';
+  return '<span class="pill '+info.cls+'">'+esc(txt)+'</span>';
+}
+
 /* ============================================================
    Toasts
    ============================================================ */
-function toast(msg, kind){
+function toast(msg, kind, opts){
   var stack = $('#toast-stack');
   if(!stack) return;
+  opts = opts || {};
   var el = document.createElement('div');
-  el.className = 'toast' + (kind ? ' '+kind : '');
-  el.textContent = msg;
+  el.className = 'toast' + (kind ? ' '+kind : '') + (opts.actionLabel ? ' toast-actionable' : '');
+  var msgEl = document.createElement('span');
+  msgEl.className = 'toast-msg';
+  msgEl.textContent = msg;
+  el.appendChild(msgEl);
+  var dur = opts.duration || 3600;
+  if(opts.actionLabel && typeof opts.onAction === 'function'){
+    dur = opts.duration || 8000;
+    var actionBtn = document.createElement('button');
+    actionBtn.type = 'button';
+    actionBtn.className = 'toast-action';
+    actionBtn.textContent = opts.actionLabel;
+    actionBtn.addEventListener('click', function(){
+      el.remove();
+      opts.onAction();
+    });
+    el.appendChild(actionBtn);
+  }
   stack.appendChild(el);
-  setTimeout(function(){ el.remove(); }, 3600);
+  setTimeout(function(){ el.remove(); }, dur);
 }
 
 /* ============================================================
@@ -566,7 +623,7 @@ function viewAlunos(){
       '<td class="mono" data-label="Carga">'+horasSemanaLabel(s)+'</td>' +
       '<td data-label="Dias de trabalho">'+esc(s.diasTrabalho||'—')+'</td>' +
       '<td data-label="Hoje">'+statusHojePill(s.id)+'</td>' +
-      '<td data-label="Pendência herdada">'+pill(s.pendenteHerdada)+'</td>' +
+      '<td data-label="Saldo da semana">'+saldoPill(s)+'</td>' +
     '</tr>';
   }).join('') || '<tr><td colspan="7"><div class="empty-state">Nenhum bolsista encontrado com esses filtros.</div></td></tr>';
 
@@ -585,7 +642,7 @@ function viewAlunos(){
               '<div class="kv"><span class="k">Carga</span><span class="v mono">'+horasSemanaLabel(s)+'</span></div>' +
               '<div class="kv"><span class="k">Dias de trabalho</span><span class="v">'+esc(s.diasTrabalho||'—')+'</span></div>' +
               '<div class="kv"><span class="k">Hoje</span><span class="v">'+statusHojePill(s.id)+'</span></div>' +
-              '<div class="kv"><span class="k">Pendência herdada</span><span class="v">'+pill(s.pendenteHerdada)+'</span></div>' +
+              '<div class="kv"><span class="k">Saldo da semana</span><span class="v">'+saldoPill(s)+'</span></div>' +
             '</div>' +
             '<button class="btn btn-sm btn-primary" data-open="'+s.id+'" type="button">Ver perfil completo</button>' +
           '</div>' +
@@ -597,7 +654,7 @@ function viewAlunos(){
           '<span class="avatar">'+initials(s.nome)+'</span>' +
           '<span class="aluno-acc-info">' +
             '<span class="aluno-acc-name">'+esc(s.nome)+(incompleto?' <span class="tag" title="Dados incompletos na planilha original">incompleto</span>':'')+'</span>' +
-            '<span class="aluno-acc-sub">RA '+esc(s.ra||'—')+' · '+pill(s.pendenteHerdada)+'</span>' +
+            '<span class="aluno-acc-sub">RA '+esc(s.ra||'—')+' · '+saldoPill(s)+'</span>' +
           '</span>' +
           '<span class="chev">›</span>' +
         '</button>' +
@@ -644,7 +701,7 @@ function viewAlunos(){
     '</div>' +
 
     '<div class="card alunos-table-card"><div class="card-body tight"><div class="table-wrap"><table>' +
-      '<thead><tr><th>Bolsista</th><th>Setor</th><th>Nível</th><th class="num">Carga</th><th>Dias de trabalho</th><th>Hoje</th><th>Pendência herdada</th></tr></thead>' +
+      '<thead><tr><th>Bolsista</th><th>Setor</th><th>Nível</th><th class="num">Carga</th><th>Dias de trabalho</th><th>Hoje</th><th>Saldo da semana</th></tr></thead>' +
       '<tbody>'+rows+'</tbody>' +
     '</table></div></div></div>' +
 
@@ -731,16 +788,27 @@ function punchButtonInline(s){
 function bulkPunch(tipo){
   var ids = UI.punchBulkSelected.slice();
   var ok = 0, skip = 0;
+  var criados = [];
   ids.forEach(function(id){
     var s = studentById(id);
     if(!s || isConservacao(s)) { if(s) skip++; return; }
     if(proximoTipo(id) !== tipo){ skip++; return; }
-    addRegistro({id: uid('r'), studentId:id, tipo:tipo, ts: nowISO(), origem: UI.punchMode==='lider' ? 'lider' : 'self'});
+    var novoId = uid('r');
+    addRegistro({id: novoId, studentId:id, tipo:tipo, ts: nowISO(), origem: UI.punchMode==='lider' ? 'lider' : 'self'});
     logAtividade((tipo==='entrada'?'Chegada':'Saída')+' registrada para '+s.nome+' às '+fmtTime(nowISO())+' (em lote).');
+    criados.push(novoId);
     ok++;
   });
   if(ok>0){
-    toast((tipo==='entrada'?'Chegada registrada':'Saída registrada')+' para '+ok+' aluno'+(ok>1?'s':'')+(skip>0?' ('+skip+' ignorado'+(skip>1?'s':'')+')':'')+'.');
+    toast((tipo==='entrada'?'Chegada registrada':'Saída registrada')+' para '+ok+' aluno'+(ok>1?'s':'')+(skip>0?' ('+skip+' ignorado'+(skip>1?'s':'')+')':'')+'.', null, {
+      actionLabel: 'Desfazer',
+      onAction: function(){
+        criados.forEach(removeRegistro);
+        logAtividade('Registro em lote desfeito ('+criados.length+' aluno'+(criados.length>1?'s':'')+', marcado por engano).');
+        toast('Registro em lote desfeito.');
+        persist();
+      }
+    });
   } else {
     toast('Nenhum aluno selecionado estava apto para essa ação.', 'err');
   }
@@ -754,16 +822,27 @@ function bulkPunchTurno(){
   var inicio = new Date();
   var fim = new Date(inicio.getTime() + 4*60*60*1000);
   var origem = UI.punchMode==='lider' ? 'lider' : 'self';
+  var criados = [];
   ids.forEach(function(id){
     var s = studentById(id);
     if(!s || !isConservacao(s)){ if(s) skip++; return; }
-    addRegistro({id: uid('r'), studentId:id, tipo:'entrada', ts: inicio.toISOString(), origem: origem});
-    addRegistro({id: uid('r'), studentId:id, tipo:'saida', ts: fim.toISOString(), origem: origem});
+    var idEntrada = uid('r'), idSaida = uid('r');
+    addRegistro({id: idEntrada, studentId:id, tipo:'entrada', ts: inicio.toISOString(), origem: origem});
+    addRegistro({id: idSaida, studentId:id, tipo:'saida', ts: fim.toISOString(), origem: origem});
     logAtividade('Turno de 4h registrado para '+s.nome+' ('+fmtTime(inicio.toISOString())+'–'+fmtTime(fim.toISOString())+', em lote).');
+    criados.push(idEntrada, idSaida);
     ok++;
   });
   if(ok>0){
-    toast('Turno de 4h registrado para '+ok+' aluno'+(ok>1?'s':'')+(skip>0?' ('+skip+' fora da Conservação, ignorado'+(skip>1?'s':'')+')':'')+'.');
+    toast('Turno de 4h registrado para '+ok+' aluno'+(ok>1?'s':'')+(skip>0?' ('+skip+' fora da Conservação, ignorado'+(skip>1?'s':'')+')':'')+'.', null, {
+      actionLabel: 'Desfazer',
+      onAction: function(){
+        criados.forEach(removeRegistro);
+        logAtividade('Turno de 4h em lote desfeito ('+ok+' aluno'+(ok>1?'s':'')+', marcado por engano).');
+        toast('Turno em lote desfeito.');
+        persist();
+      }
+    });
   } else {
     toast('Nenhum aluno selecionado é do setor Conservação.', 'err');
   }
@@ -1225,9 +1304,18 @@ function bindEvents(){
       var id = btn.getAttribute('data-id');
       var tipo = btn.getAttribute('data-punch');
       var s = studentById(id);
-      addRegistro({id: uid('r'), studentId:id, tipo:tipo, ts: nowISO(), origem: UI.punchMode==='lider' ? 'lider' : 'self'});
+      var novoId = uid('r');
+      addRegistro({id: novoId, studentId:id, tipo:tipo, ts: nowISO(), origem: UI.punchMode==='lider' ? 'lider' : 'self'});
       logAtividade((tipo==='entrada'?'Chegada':'Saída')+' registrada para '+s.nome+' às '+fmtTime(nowISO())+'.');
-      toast((tipo==='entrada'?'Chegada':'Saída')+' registrada para '+s.nome+'.');
+      toast((tipo==='entrada'?'Chegada':'Saída')+' registrada para '+s.nome+'.', null, {
+        actionLabel: 'Desfazer',
+        onAction: function(){
+          removeRegistro(novoId);
+          logAtividade((tipo==='entrada'?'Chegada':'Saída')+' de '+s.nome+' desfeita (marcada por engano).');
+          toast('Registro desfeito.');
+          persist();
+        }
+      });
       persist();
     });
   });
@@ -1238,10 +1326,20 @@ function bindEvents(){
       var inicio = new Date();
       var fim = new Date(inicio.getTime() + 4*60*60*1000);
       var origem = UI.punchMode==='lider' ? 'lider' : 'self';
-      addRegistro({id: uid('r'), studentId:id, tipo:'entrada', ts: inicio.toISOString(), origem: origem});
-      addRegistro({id: uid('r'), studentId:id, tipo:'saida', ts: fim.toISOString(), origem: origem});
+      var idEntrada = uid('r'), idSaida = uid('r');
+      addRegistro({id: idEntrada, studentId:id, tipo:'entrada', ts: inicio.toISOString(), origem: origem});
+      addRegistro({id: idSaida, studentId:id, tipo:'saida', ts: fim.toISOString(), origem: origem});
       logAtividade('Turno de 4h registrado para '+s.nome+' ('+fmtTime(inicio.toISOString())+'–'+fmtTime(fim.toISOString())+').');
-      toast('Turno de 4h registrado para '+s.nome+'.');
+      toast('Turno de 4h registrado para '+s.nome+'.', null, {
+        actionLabel: 'Desfazer',
+        onAction: function(){
+          removeRegistro(idEntrada);
+          removeRegistro(idSaida);
+          logAtividade('Turno de 4h de '+s.nome+' desfeito (marcado por engano).');
+          toast('Turno desfeito.');
+          persist();
+        }
+      });
       persist();
     });
   });
@@ -1420,17 +1518,11 @@ function viewAlunoPainel(){
     statusText = sameDay(last.ts) ? ('Você saiu às ' + fmtTime(last.ts) + '. Pode registrar nova chegada se voltar hoje.') : 'Você ainda não bateu o ponto hoje.';
   }
 
-  var minsSemana = minutosTrabalhados(s.id, mondayDaSemanaISO());
-  var metaSemana = (s.horasSemana||0) * 60;
-  var saldo = minsSemana - metaSemana;
-  var saldoTxt, saldoCls;
-  if(!s.horasSemana){
-    saldoTxt = 'Carga horária semanal não definida.'; saldoCls = 'pill-muted';
-  } else if(saldo >= 0){
-    saldoTxt = fmtHoras(saldo) + ' a mais esta semana'; saldoCls = 'pill-ok';
-  } else {
-    saldoTxt = fmtHoras(-saldo) + ' devendo esta semana'; saldoCls = 'pill-crit';
-  }
+  var saldoInfo = saldoSemanaInfo(s);
+  var saldoTxt = saldoInfo.saldo===null ? 'Carga horária semanal não definida.'
+    : saldoInfo.saldo>=0 ? fmtHoras(saldoInfo.saldo) + ' a mais esta semana'
+    : fmtHoras(-saldoInfo.saldo) + ' devendo esta semana';
+  var saldoCls = saldoInfo.cls;
 
   var historico = registrosDoAluno(s.id).slice().reverse().slice(0,10).map(function(r){
     return '<div class="log-item"><span class="t">'+fmtDateTime(r.ts)+'</span><span>'+(r.tipo==='entrada'?'Chegada':'Saída')+'</span></div>';
