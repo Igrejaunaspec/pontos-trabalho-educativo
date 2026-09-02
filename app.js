@@ -24,6 +24,8 @@ function freshUI(){
     punchSearch: '',
     punchBulkMode: false,
     punchBulkSelected: [],
+    aprovandoCadastroUid: null,
+    aprovandoCadastroDados: null,
     pedidosTab: 'pendentes',
     configTab: 'bolsas'
   };
@@ -296,15 +298,19 @@ function render(){
   var dateLabel = DIAS_SEMANA[today.getDay()] + ', ' + today.getDate() + ' de ' + MESES[today.getMonth()] + ' de ' + today.getFullYear();
 
   var pend = pedidosPendentes().length;
+  var cadPend = (STATE.cadastrosPendentes||[]).length;
+  var navBadge = {pedidos: pend, alunos: cadPend};
 
   var navHtml = NAV.map(function(n){
-    var badge = (n.id==='pedidos' && pend>0) ? '<span class="count">'+pend+'</span>' : '';
+    var n2 = navBadge[n.id] || 0;
+    var badge = n2>0 ? '<span class="count">'+n2+'</span>' : '';
     return '<button class="nav-btn' + (UI.view===n.id?' active':'') + '" data-nav="'+n.id+'">' +
       '<span class="ico">'+n.ico+'</span><span>'+n.label+'</span>'+badge+'</button>';
   }).join('');
 
   var bottomNavHtml = NAV.map(function(n){
-    var badge = (n.id==='pedidos' && pend>0) ? '<span class="count">'+pend+'</span>' : '';
+    var n2 = navBadge[n.id] || 0;
+    var badge = n2>0 ? '<span class="count">'+n2+'</span>' : '';
     return '<button class="bottom-nav-btn' + (UI.view===n.id?' active':'') + '" data-nav="'+n.id+'">' +
       '<span class="ico">'+n.ico+badge+'</span><span class="label">'+(NAV_SHORT[n.id]||n.label)+'</span></button>';
   }).join('');
@@ -582,12 +588,32 @@ function viewAlunos(){
     );
   }).join('') || '<div class="empty-state">Nenhum bolsista encontrado com esses filtros.</div>';
 
+  var cadastrosPendentes = STATE.cadastrosPendentes || [];
+  var cadastrosHtml = !cadastrosPendentes.length ? '' : (
+    '<div class="card card-pending">' +
+      '<div class="card-head"><h2>Cadastros pendentes de aprovação</h2><span class="meta">'+cadastrosPendentes.length+'</span></div>' +
+      '<div class="card-body" style="display:flex;flex-direction:column;gap:8px;">' +
+        cadastrosPendentes.map(function(c){
+          return '<div class="log-item" style="flex-wrap:wrap;">' +
+            '<span style="flex:1;min-width:200px;"><b>'+esc(c.nome||'(sem nome)')+'</b> · RA '+esc(c.ra||'—') +
+              '<br><span style="color:var(--muted);">'+esc(c.email||'')+' · cadastrado em '+fmtDateTime(c.criadoEm)+'</span></span>' +
+            '<button class="btn btn-sm btn-primary" data-aprovar-cadastro="'+esc(c.id)+'" type="button">Aprovar</button>' +
+            '<button class="btn btn-sm btn-danger" data-rejeitar-cadastro="'+esc(c.id)+'" type="button">Excluir</button>' +
+          '</div>';
+        }).join('') +
+      '</div>' +
+      '<div class="card-body" style="padding-top:0;"><div class="view-sub">Essas pessoas se cadastraram pelo RA delas, mas o RA não foi encontrado na lista de bolsistas — o login já existe, só falta completar o cadastro (setor, nível, etc.) ou excluir se não for válido.</div></div>' +
+    '</div>'
+  );
+
   return (
     '<div class="view-head"><div><h1>Alunos</h1><div class="view-sub">'+STATE.students.length+' bolsistas cadastrados. Clique em um nome para ver o perfil completo.</div></div>' +
       '<div class="toolbar" style="gap:8px;">' +
         '<button class="btn btn-ghost" data-action="exportar-excel">⇩ Exportar Excel</button>' +
         '<button class="btn btn-primary" data-action="novo-aluno">+ Novo aluno</button>' +
       '</div></div>' +
+
+    cadastrosHtml +
 
     '<div class="toolbar">' +
       '<div class="search"><input type="text" id="busca-aluno" placeholder="Buscar por nome ou RA…" value="'+esc(UI.alunoBusca)+'"></div>' +
@@ -952,12 +978,16 @@ function renderDrawer(){
   var existing = $('.overlay');
   if(existing) existing.remove();
   var creating = UI.drawerCreate;
-  var s = creating ? {id:'', nome:'', setor:STATE.setores[0].id, nivel:'EM', bolsa:'', ra:'', telefone:'', aniversario:'', curso:'', diasTrabalho:'', pendenteHerdada:'', observacao:'', ativo:true} : studentById(UI.drawerId);
+  var aprovando = creating && UI.aprovandoCadastroUid;
+  var s = creating ? Object.assign(
+    {id:'', nome:'', setor:STATE.setores[0].id, nivel: aprovando?'FAC':'EM', bolsa:'', ra:'', telefone:'', aniversario:'', curso:'', diasTrabalho:'', pendenteHerdada:'', observacao:'', ativo:true},
+    (UI.aprovandoCadastroDados || {})
+  ) : studentById(UI.drawerId);
   if(!s){ UI.drawerId = null; return; }
 
   var overlay = document.createElement('div');
   overlay.className = 'overlay';
-  overlay.innerHTML = '<div class="drawer">' + (UI.drawerEdit || creating ? drawerEditForm(s, creating) : drawerView(s)) + '</div>';
+  overlay.innerHTML = '<div class="drawer">' + (UI.drawerEdit || creating ? drawerEditForm(s, creating, aprovando) : drawerView(s)) + '</div>';
   document.body.appendChild(overlay);
 
   overlay.addEventListener('mousedown', function(e){ if(e.target===overlay) closeDrawer(); });
@@ -983,6 +1013,7 @@ function renderDrawer(){
 }
 function closeDrawer(){
   UI.drawerId = null; UI.drawerEdit = false; UI.drawerCreate = false;
+  UI.aprovandoCadastroUid = null; UI.aprovandoCadastroDados = null;
   var overlay = $('.overlay'); if(overlay) overlay.remove();
 }
 function drawerView(s){
@@ -1019,11 +1050,12 @@ function drawerView(s){
 function kv(k,v,full){
   return '<div class="kv'+(full?' full':'')+'"><span class="k">'+esc(k)+'</span><span class="v">'+esc(v)+'</span></div>';
 }
-function drawerEditForm(s, creating){
+function drawerEditForm(s, creating, aprovando){
   var setorOpts = STATE.setores.map(function(x){ return '<option value="'+x.id+'"'+(x.id===s.setor?' selected':'')+'>'+esc(x.nome)+'</option>'; }).join('');
   return (
-    '<div class="drawer-head"><div class="name">'+(creating?'Novo aluno':'Editar '+esc(s.nome))+'</div>' +
+    '<div class="drawer-head"><div class="name">'+(aprovando?'Aprovar cadastro':(creating?'Novo aluno':'Editar '+esc(s.nome)))+'</div>' +
       '<button class="close-btn" aria-label="Fechar">✕</button></div>' +
+    (aprovando ? '<div class="banner">Essa pessoa já criou o login com o e-mail dela — complete o setor, nível e demais dados abaixo para liberar o acesso.</div>' : '') +
     '<form id="form-perfil" style="display:flex;flex-direction:column;gap:14px;">' +
       '<label>Nome completo<input type="text" name="nome" required value="'+esc(s.nome)+'"></label>' +
       '<div class="field-row">' +
@@ -1043,7 +1075,7 @@ function drawerEditForm(s, creating){
         '<label>Dias de trabalho<input type="text" name="diasTrabalho" value="'+esc(s.diasTrabalho)+'" placeholder="ex.: Seg. a sex."></label>' +
       '</div>' +
       '<label>Observações<textarea name="observacao">'+esc(s.observacao)+'</textarea></label>' +
-      '<div class="toolbar"><button class="btn btn-primary" type="submit">'+(creating?'Cadastrar aluno':'Salvar alterações')+'</button>' +
+      '<div class="toolbar"><button class="btn btn-primary" type="submit">'+(aprovando?'Aprovar e cadastrar':(creating?'Cadastrar aluno':'Salvar alterações'))+'</button>' +
         '<button class="btn btn-ghost" type="button" data-drawer-cancel>Cancelar</button></div>' +
     '</form>'
   );
@@ -1066,10 +1098,22 @@ function saveProfileForm(form, s, creating){
   if(creating){
     var novo = Object.assign({id: uid('s'), pendenteHerdada:'', ativo:true, horasSemana: STATE.bolsaHoras[patch.bolsa]===undefined?null:STATE.bolsaHoras[patch.bolsa]}, patch);
     STATE.students.push(novo);
-    logAtividade('Cadastrou o aluno '+novo.nome+'.');
+    var aprovandoUid = UI.aprovandoCadastroUid;
+    if(aprovandoUid){
+      logAtividade('Aprovou o cadastro de '+novo.nome+' (autocadastro por RA) e vinculou o login.');
+      if(typeof window.__pontosAprovarCadastro === 'function'){
+        window.__pontosAprovarCadastro(aprovandoUid, novo.id).catch(function(){
+          toast('Aluno cadastrado, mas houve um problema ao liberar o login dele. Tente novamente em Alunos.', 'err');
+        });
+      }
+    } else {
+      logAtividade('Cadastrou o aluno '+novo.nome+'.');
+    }
     UI.drawerCreate = false;
     UI.drawerId = novo.id;
     UI.drawerEdit = false;
+    UI.aprovandoCadastroUid = null;
+    UI.aprovandoCadastroDados = null;
   } else {
     Object.assign(s, patch);
     s.horasSemana = STATE.bolsaHoras[s.bolsa] === undefined ? s.horasSemana : STATE.bolsaHoras[s.bolsa];
@@ -1101,7 +1145,11 @@ function bindEvents(){
   var fNivel = $('#filtro-nivel');
   if(fNivel) fNivel.addEventListener('change', function(){ UI.alunoFiltroNivel = fNivel.value; render(); });
   var novoAlunoBtn = $('[data-action="novo-aluno"]');
-  if(novoAlunoBtn) novoAlunoBtn.addEventListener('click', function(){ UI.drawerCreate = true; UI.drawerId = null; UI.drawerEdit = false; renderDrawer(); });
+  if(novoAlunoBtn) novoAlunoBtn.addEventListener('click', function(){
+    UI.drawerCreate = true; UI.drawerId = null; UI.drawerEdit = false;
+    UI.aprovandoCadastroUid = null; UI.aprovandoCadastroDados = null;
+    renderDrawer();
+  });
   $all('[data-action="exportar-excel"]').forEach(function(btn){
     btn.addEventListener('click', function(){ exportarExcel(); });
   });
@@ -1110,6 +1158,33 @@ function bindEvents(){
   });
   $all('[data-toggle-aluno]').forEach(function(btn){
     btn.addEventListener('click', function(){ toggleAccordion('alunoAberto', btn.getAttribute('data-toggle-aluno')); render(); });
+  });
+  $all('[data-aprovar-cadastro]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var uidCad = btn.getAttribute('data-aprovar-cadastro');
+      var c = (STATE.cadastrosPendentes||[]).filter(function(x){return x.id===uidCad;})[0];
+      UI.aprovandoCadastroUid = uidCad;
+      UI.aprovandoCadastroDados = {nome: c ? (c.nome||'') : '', ra: c ? (c.ra||'') : ''};
+      UI.drawerCreate = true; UI.drawerId = null; UI.drawerEdit = false;
+      renderDrawer();
+    });
+  });
+  $all('[data-rejeitar-cadastro]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var uidCad = btn.getAttribute('data-rejeitar-cadastro');
+      var c = (STATE.cadastrosPendentes||[]).filter(function(x){return x.id===uidCad;})[0];
+      if(typeof window.__pontosRejeitarCadastro !== 'function'){
+        toast('Não foi possível excluir agora. Verifique sua conexão.', 'err');
+        return;
+      }
+      window.__pontosRejeitarCadastro(uidCad).then(function(){
+        logAtividade('Excluiu o cadastro pendente de '+(c?c.nome:uidCad)+' (RA não encontrado).');
+        toast('Cadastro excluído.');
+        persist();
+      }).catch(function(){
+        toast('Não foi possível excluir agora. Verifique sua conexão.', 'err');
+      });
+    });
   });
 
   // Ponto view
@@ -1487,12 +1562,14 @@ function bindEventsAluno(){
 window.__pontosBoot = function(initialState){
   MODE = 'admin';
   STATE = initialState;
+  STATE.cadastrosPendentes = STATE.cadastrosPendentes || [];
   UI = freshUI();
   render();
 };
 window.__pontosApplyRemote = function(newState){
   if(MODE!=='admin' || !STATE) return; // ainda não fez boot, ou é sessão de aluno
   STATE = newState;
+  STATE.cadastrosPendentes = STATE.cadastrosPendentes || [];
   render();
 };
 
@@ -1514,5 +1591,38 @@ window.__pontosStudentApply = function(perfil, registros, pedidos){
   STATE.pedidos = pedidos || [];
   renderAluno();
 };
+
+/* Cadastro por RA feito, mas ainda aguardando a administração completar
+   o perfil (setor, nível, etc.) — ver README do fluxo em firebase-init.js. */
+window.__pontosStudentPending = function(nome){
+  MODE = 'aluno-pendente';
+  renderPendente(nome);
+};
+function renderPendente(nome){
+  var app = $('#app');
+  app.innerHTML =
+    '<div class="aluno-shell">' +
+      '<div class="aluno-topbar"><span class="mark">Trabalho Educativo</span>' +
+        '<button class="btn btn-ghost btn-sm" id="logout-btn" type="button">Sair</button></div>' +
+      '<div class="aluno-wrap">' +
+        '<div class="aluno-card" style="display:flex;flex-direction:column;align-items:center;text-align:center;">' +
+          '<span class="avatar" style="width:52px;height:52px;font-size:17px;">'+initials(nome||'?')+'</span>' +
+          '<div class="name" style="margin-top:10px;">'+(nome?esc(nome):'Cadastro enviado')+'</div>' +
+          '<div class="view-sub" style="margin-top:6px;">Seu login foi criado, mas seu RA ainda não estava na lista de bolsistas do sistema — seu cadastro está aguardando a administração completar as informações (setor, nível, etc.).</div>' +
+          '<div class="view-sub" style="margin-top:10px;">Assim que for aprovado, é só entrar de novo por aqui que o painel de ponto aparece normalmente.</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  if(!$('.toast-stack')){
+    var stack = document.createElement('div');
+    stack.className = 'toast-stack';
+    stack.id = 'toast-stack';
+    document.body.appendChild(stack);
+  }
+  var logoutBtn = $('#logout-btn');
+  if(logoutBtn) logoutBtn.addEventListener('click', function(){
+    if(typeof window.__pontosLogout === 'function') window.__pontosLogout();
+  });
+}
 
 })();
