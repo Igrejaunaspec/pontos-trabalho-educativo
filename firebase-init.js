@@ -40,6 +40,29 @@ var lastSentJSON = null;
 // commit do vínculo em alunoAuth/alunoClaimed) — evita que onAuthStateChanged
 // trate o novo usuário como "sem vínculo" antes da hora, numa corrida.
 var suppressAuthHandling = false;
+// mensagem a exibir na tela de login assim que o onAuthStateChanged perceber
+// o logout (usado quando o próprio código força um signOut(auth) por algum
+// problema — evita que a chamada showLogin() sem argumento, disparada pelo
+// listener de auth logo em seguida, apague a mensagem antes que dê tempo de
+// aparecer).
+var pendingLoginMessage = null;
+// vigia global: se "booted" não virar true em ~15s depois do login (perfil
+// não encontrado, permissão negada sem erro claro, conexão instável no
+// celular, etc.), evita que a tela fique presa em "Carregando dados…" para
+// sempre — desloga com uma mensagem explicativa em vez de travar em silêncio.
+var loadTimeoutId = null;
+function clearLoadTimeout(){
+  if(loadTimeoutId){ clearTimeout(loadTimeoutId); loadTimeoutId = null; }
+}
+function scheduleLoadTimeout(){
+  clearLoadTimeout();
+  loadTimeoutId = setTimeout(function(){
+    loadTimeoutId = null;
+    if(booted) return;
+    pendingLoginMessage = 'Não foi possível carregar seus dados agora. Verifique sua conexão e tente entrar novamente.';
+    signOut(auth);
+  }, 15000);
+}
 
 // listeners ativos (para poder cancelar ao trocar de papel / deslogar)
 var unsubAdminState = null;
@@ -204,6 +227,7 @@ function stopAllListeners(){
   if(unsubAlunoPerfil){ unsubAlunoPerfil(); unsubAlunoPerfil = null; }
   if(unsubAlunoRegistros){ unsubAlunoRegistros(); unsubAlunoRegistros = null; }
   if(unsubAlunoPedidos){ unsubAlunoPedidos(); unsubAlunoPedidos = null; }
+  clearLoadTimeout();
 }
 
 /* ============================================================
@@ -249,6 +273,7 @@ function startListeningAdmin(){
     var merged = Object.assign({}, lastDocData, {registros: lastRegistros, pedidos: lastPedidos, cadastrosPendentes: lastCadastros});
     if(!booted){
       booted = true;
+      clearLoadTimeout();
       window.__pontosBoot(merged);
     } else {
       window.__pontosApplyRemote(merged);
@@ -339,7 +364,7 @@ function startListeningAluno(uid){
   if(unsubAlunoPerfil) return;
   getDoc(doc(db, 'alunoAuth', uid)).then(function(snap){
     if(!snap.exists()){
-      showLogin('Este login não está vinculado a nenhum aluno. Fale com a administração.');
+      pendingLoginMessage = 'Este login não está vinculado a nenhum aluno. Fale com a administração.';
       signOut(auth);
       return;
     }
@@ -347,6 +372,7 @@ function startListeningAluno(uid){
     if(authData.status === 'pendente' && !authData.studentId){
       // RA não encontrado no cadastro do sistema — aguardando a
       // administração completar o perfil (ver "cadastrosPendentes").
+      clearLoadTimeout();
       window.__pontosStudentPending(authData.nome || '');
       return;
     }
@@ -357,6 +383,7 @@ function startListeningAluno(uid){
       if(!perfilLoaded) return;
       if(!booted){
         booted = true;
+        clearLoadTimeout();
         window.__pontosStudentBoot(perfil, registros, pedidos);
       } else {
         window.__pontosStudentApply(perfil, registros, pedidos);
@@ -364,11 +391,22 @@ function startListeningAluno(uid){
     }
 
     unsubAlunoPerfil = onSnapshot(doc(db, 'students', studentId), function(s){
-      if(!s.exists()) return;
+      if(!s.exists()){
+        // alunoAuth aponta pra um studentId que não existe mais (por ex.
+        // um cadastro apagado e recriado do zero pela administração) —
+        // sem isso, a tela ficava presa em "Carregando dados…" pra sempre.
+        pendingLoginMessage = 'Não foi possível encontrar seu cadastro de aluno. Fale com a administração.';
+        signOut(auth);
+        return;
+      }
       perfil = s.data();
       perfilLoaded = true;
       emitAluno();
-    }, function(err){ console.error('[pontos] perfil snapshot error', err); });
+    }, function(err){
+      console.error('[pontos] perfil snapshot error', err);
+      pendingLoginMessage = 'Não foi possível carregar seus dados agora. Verifique sua conexão e tente novamente.';
+      signOut(auth);
+    });
 
     unsubAlunoRegistros = onSnapshot(
       query(collection(db, 'registros'), where('studentId', '==', studentId)),
@@ -398,6 +436,7 @@ function handleUserSignedIn(user){
   if(!appRoot.hasChildNodes()){
     appRoot.innerHTML = '<div class="login-loading">Carregando dados…</div>';
   }
+  scheduleLoadTimeout();
   if(isAdminEmail(user.email)){
     startListeningAdmin();
   } else {
@@ -413,6 +452,7 @@ onAuthStateChanged(auth, function(user){
     stopAllListeners();
     booted = false;
     lastSentJSON = null;
-    showLogin();
+    showLogin(pendingLoginMessage);
+    pendingLoginMessage = null;
   }
 });
