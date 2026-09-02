@@ -96,7 +96,25 @@ function uid(prefix){
 function pad2(n){ return String(n).length < 2 ? '0'+n : String(n); }
 function nowISO(){ return new Date().toISOString(); }
 function todayKey(d){ d = d || new Date(); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
-function sameDay(iso, d){ return iso && iso.slice(0,10) === todayKey(d); }
+// Compara pelo dia LOCAL de verdade (não a data UTC do ISO): à noite, em
+// fusos negativos (ex.: Brasil, UTC-3), o "dia" em UTC de um horário como
+// 22h já virou o dia seguinte — comparar strings cruas (iso.slice(0,10))
+// contra a data local de hoje classificava erradamente um registro de
+// hoje à noite como "de outro dia" (ou "sem registro hoje").
+function sameDay(iso, d){
+  if(!iso) return false;
+  var a = new Date(iso);
+  var b = d || new Date();
+  return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+}
+// Meia-noite local de hoje (ou do dia de "d"), como ISO — para usar como
+// limite de "desde o início do dia" em minutosTrabalhados(). Diferente de
+// todayKey()+'T00:00:00.000Z', que tratava a meia-noite LOCAL como se
+// fosse meia-noite UTC (errado fora do fuso UTC+0).
+function localMidnightISO(d){
+  d = d || new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).toISOString();
+}
 function fmtDateTime(iso){
   if(!iso) return '—';
   var d = new Date(iso);
@@ -642,7 +660,7 @@ function turnosHojeCount(id){
    acordeão inline mobile (punchButtonInline) — status/ações/dica. */
 function punchActionsBlock(s){
   var id = s.id;
-  var minsHoje = minutosTrabalhados(id, todayKey()+'T00:00:00.000Z');
+  var minsHoje = minutosTrabalhados(id, localMidnightISO());
   if(isConservacao(s)){
     var n = turnosHojeCount(id);
     var statusTurno = n>0 ? (n===1 ? '1 turno registrado hoje.' : n+' turnos registrados hoje.') : 'Nenhum turno registrado hoje.';
