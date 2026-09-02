@@ -353,6 +353,10 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
   transition:max-height var(--ease), opacity var(--ease);
 }
 .acc-panel.acc-open{max-height:640px;opacity:1;}
+/* O calendário (grade de 30 dias + card de detalhe do dia) costuma passar
+   de 640px em telas estreitas — usa um teto bem mais alto para nunca
+   cortar o conteúdo dentro do acordeão inline do celular. */
+.cal-acc.acc-open{max-height:3000px;}
 .acc-panel-inner{padding-top:10px;}
 
 .chev{
@@ -441,6 +445,30 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
 .empty-state{
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
   padding:40px 20px;color:var(--muted);text-align:center;font-size:13px;
+}
+
+/* ---------- Calendário (30 dias) ---------- */
+.cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;}
+.cal-weekday{text-align:center;font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
+.cal-cell{
+  aspect-ratio:1/1;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;
+  transition:background var(--ease),box-shadow var(--ease),transform var(--ease);padding:2px;
+}
+.cal-cell:hover{background:var(--surface-2);}
+.cal-cell.cal-pad{visibility:hidden;pointer-events:none;border:none;background:transparent;}
+.cal-daynum{font-size:12px;font-weight:600;color:var(--ink-soft);}
+.cal-hours{font-family:var(--font-mono);font-size:9.5px;color:var(--muted);}
+.cal-cell.has-reg{background:var(--success-soft);border-color:transparent;}
+.cal-cell.has-reg .cal-daynum{color:var(--success);}
+.cal-cell.has-reg .cal-hours{color:var(--success);font-weight:600;}
+.cal-cell.is-today{box-shadow:0 0 0 2px var(--accent);}
+.cal-cell.selected{background:var(--accent);}
+.cal-cell.selected .cal-daynum,.cal-cell.selected .cal-hours{color:var(--accent-ink);}
+@media (max-width:520px){
+  .cal-daynum{font-size:11px;}
+  .cal-hours{font-size:9px;}
 }
 
 /* ---------- Profile drawer ---------- */

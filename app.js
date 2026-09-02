@@ -27,7 +27,10 @@ function freshUI(){
     aprovandoCadastroUid: null,
     aprovandoCadastroDados: null,
     pedidosTab: 'pendentes',
-    configTab: 'bolsas'
+    configTab: 'bolsas',
+    calendarioAlunoId: null,
+    calendarioBusca: '',
+    calendarioDiaSel: null
   };
 }
 var SYNC = 'idle'; // idle | busy | off
@@ -77,7 +80,7 @@ function syncAccordionAnimations(){
 
 var DIAS_SEMANA = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
 var MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
-var MESES_ABREV = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+var DIAS_SEMANA_CURTO_SEG = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom']; // segunda-feira primeiro (calendário de 30 dias)
 
 /* ============================================================
    Small utilities
@@ -205,6 +208,27 @@ function minutosTrabalhados(id, sinceISO){
     } else if(r.tipo === 'saida' && pilha.length){
       var abertura = pilha.pop();
       total += (new Date(r.ts) - new Date(abertura)) / 60000;
+    }
+  }
+  return total;
+}
+/* Registros de um aluno num dia específico (calendário local), já ordenados. */
+function registrosDoAlunoNoDia(id, d){
+  var iniISO = localMidnightISO(d);
+  var fimISO = localMidnightISO(new Date(d.getFullYear(), d.getMonth(), d.getDate()+1));
+  return registrosDoAluno(id).filter(function(r){ return r.ts >= iniISO && r.ts < fimISO; });
+}
+/* Minutos trabalhados num único dia (mesma lógica de pilha de minutosTrabalhados,
+   mas restrita àquele dia — usada no calendário de 30 dias). */
+function minutosNoDia(id, d){
+  var list = registrosDoAlunoNoDia(id, d);
+  var total = 0, pilha = [];
+  for(var i=0;i<list.length;i++){
+    var r = list[i];
+    if(r.tipo === 'entrada'){
+      pilha.push(r.ts);
+    } else if(r.tipo === 'saida' && pilha.length){
+      total += (new Date(r.ts) - new Date(pilha.pop())) / 60000;
     }
   }
   return total;
@@ -362,10 +386,11 @@ var NAV = [
   {id:'dashboard', label:'Visão geral', ico:'▣'},
   {id:'alunos', label:'Alunos', ico:'☰'},
   {id:'ponto', label:'Registrar ponto', ico:'●'},
+  {id:'calendario', label:'Calendário', ico:'▦'},
   {id:'pedidos', label:'Pedidos de ajuste', ico:'✉'},
   {id:'config', label:'Configurações', ico:'⚙'}
 ];
-var NAV_SHORT = {dashboard:'Início', alunos:'Alunos', ponto:'Ponto', pedidos:'Pedidos', config:'Ajustes'};
+var NAV_SHORT = {dashboard:'Início', alunos:'Alunos', ponto:'Ponto', calendario:'Calendário', pedidos:'Pedidos', config:'Ajustes'};
 
 function render(){
   var app = $('#app');
@@ -413,6 +438,7 @@ function render(){
   if(UI.view === 'dashboard') root.innerHTML = viewDashboard(dateLabel);
   else if(UI.view === 'alunos') root.innerHTML = viewAlunos();
   else if(UI.view === 'ponto') root.innerHTML = viewPonto();
+  else if(UI.view === 'calendario') root.innerHTML = viewCalendario();
   else if(UI.view === 'pedidos') root.innerHTML = viewPedidos();
   else if(UI.view === 'config') root.innerHTML = viewConfig();
 
@@ -951,6 +977,125 @@ function viewPonto(){
   );
 }
 
+/* ============================================================
+   Calendário — últimos 30 dias de um aluno: em quais dias veio e
+   quantas horas fez em cada um.
+   ============================================================ */
+function viewCalendario(){
+  var pool = STATE.students.filter(function(s){ return s.ativo; });
+  if(UI.calendarioBusca){
+    var q = UI.calendarioBusca.toLowerCase();
+    pool = pool.filter(function(s){ return s.nome.toLowerCase().indexOf(q)!==-1 || (s.ra||'').indexOf(q)!==-1; });
+  }
+  pool = pool.slice().sort(function(a,b){ return a.nome.localeCompare(b.nome,'pt-BR'); });
+
+  var listHtml = pool.map(function(s){
+    var key = 'calendarioAlunoId:'+s.id;
+    var selected = UI.calendarioAlunoId===s.id;
+    var inline = '';
+    if(accordionShouldRender('calendarioAlunoId', s.id)){
+      inline =
+        '<div class="punch-inline-acc cal-acc '+accordionPanelClass('calendarioAlunoId', s.id)+'" data-acc-key="'+key+'">' +
+          '<div class="acc-panel-inner">'+calendarioAluno(s)+'</div>' +
+        '</div>';
+    }
+    return (
+      '<div>' +
+        '<button class="punch-item'+(selected?' selected':'')+'" data-select-calendario="'+s.id+'" type="button" aria-expanded="'+(selected?'true':'false')+'">' +
+          '<span class="avatar">'+initials(s.nome)+'</span>' +
+          '<span class="name">'+esc(s.nome)+'</span>' +
+          '<span class="chev">›</span>' +
+        '</button>' +
+        inline +
+      '</div>'
+    );
+  }).join('') || '<div class="empty-state">Nenhum bolsista encontrado.</div>';
+
+  var s = UI.calendarioAlunoId ? studentById(UI.calendarioAlunoId) : null;
+
+  return (
+    '<div class="view-head"><div><h1>Calendário</h1><div class="view-sub">Selecione um bolsista para ver, dia a dia, nos últimos 30 dias, quando veio e quantas horas cumpriu.</div></div></div>' +
+
+    '<div class="punch-wrap">' +
+      '<div class="card">' +
+        '<div class="card-head"><h2>Bolsistas</h2></div>' +
+        '<div class="card-body">' +
+          '<div class="search" style="margin-bottom:10px;"><input type="text" id="calendario-busca" placeholder="Buscar por nome ou RA…" value="'+esc(UI.calendarioBusca)+'"></div>' +
+          '<div class="punch-list">'+listHtml+'</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card punch-detail-card"><div class="card-body">'+(s ? calendarioAluno(s) : '<div class="empty-state">Selecione um bolsista na lista ao lado para ver o calendário dos últimos 30 dias.</div>')+'</div></div>' +
+    '</div>'
+  );
+}
+
+function calendarioAluno(s){
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var hojeKey = todayKey(hoje);
+  var dias = [];
+  for(var i=29;i>=0;i--){
+    dias.push(new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()-i));
+  }
+
+  var totalDiasComRegistro = 0, totalMin = 0;
+  var cells = dias.map(function(d){
+    var mins = minutosNoDia(s.id, d);
+    var temRegistro = registrosDoAlunoNoDia(s.id, d).length > 0;
+    if(temRegistro) totalDiasComRegistro++;
+    totalMin += mins;
+    var key = todayKey(d);
+    var cls = 'cal-cell' + (temRegistro?' has-reg':'') + (key===hojeKey?' is-today':'') + (UI.calendarioDiaSel===key?' selected':'');
+    return (
+      '<button class="'+cls+'" type="button" data-cal-dia="'+key+'">' +
+        '<span class="cal-daynum">'+d.getDate()+'</span>' +
+        (mins>0 ? '<span class="cal-hours">'+fmtHoras(mins)+'</span>' : (temRegistro ? '<span class="cal-hours">—</span>' : '')) +
+      '</button>'
+    );
+  }).join('');
+
+  // Padding para alinhar a 1ª coluna com o dia da semana certo (Seg=0..Dom=6)
+  var primeiroDiaSemana = (dias[0].getDay()+6)%7;
+  var padCells = '';
+  for(var p=0;p<primeiroDiaSemana;p++){ padCells += '<span class="cal-cell cal-pad" aria-hidden="true"></span>'; }
+
+  var headerDias = DIAS_SEMANA_CURTO_SEG.map(function(d){ return '<span class="cal-weekday">'+d+'</span>'; }).join('');
+
+  var diaSelInfo = '';
+  if(UI.calendarioDiaSel){
+    var dSel = dias.filter(function(d){ return todayKey(d)===UI.calendarioDiaSel; })[0];
+    if(dSel){
+      var regsDia = registrosDoAlunoNoDia(s.id, dSel);
+      var minsDia = minutosNoDia(s.id, dSel);
+      var itens = regsDia.map(function(r){
+        return '<div class="log-item"><span class="t">'+fmtTime(r.ts)+'</span><span>'+(r.tipo==='entrada'?'Chegada':'Saída')+' · <span style="color:var(--muted);">'+esc(r.origem||'')+'</span></span></div>';
+      }).join('') || '<div class="empty-state">Nenhum registro nesse dia.</div>';
+      diaSelInfo =
+        '<div class="card" style="margin-top:14px;">' +
+          '<div class="card-head"><h2>'+DIAS_SEMANA[dSel.getDay()]+', '+fmtDateBR(UI.calendarioDiaSel)+'</h2>' +
+            '<span class="meta">'+(minsDia>0 ? fmtHoras(minsDia)+' no dia' : (regsDia.length ? 'sem par completo' : 'sem registro'))+'</span>' +
+          '</div>' +
+          '<div class="card-body" style="display:flex;flex-direction:column;gap:6px;">'+itens+'</div>' +
+        '</div>';
+    }
+  }
+
+  return (
+    '<div class="punch-status" style="margin-bottom:14px;">' +
+      '<span class="avatar" style="width:44px;height:44px;font-size:15px;">'+initials(s.nome)+'</span>' +
+      '<span class="who">'+esc(s.nome)+'</span>' +
+      '<span class="state">'+esc(s.setorNome || setorNome(s.setor))+' · '+nivelLabel(s.nivel)+'</span>' +
+    '</div>' +
+    '<div class="stat-grid" style="margin-bottom:14px;">' +
+      '<div class="stat-card"><span class="label">Dias com registro</span><span class="value mono">'+totalDiasComRegistro+'/30</span><span class="hint">nos últimos 30 dias</span></div>' +
+      '<div class="stat-card"><span class="label">Total de horas</span><span class="value mono">'+fmtHoras(totalMin)+'</span><span class="hint">no período</span></div>' +
+    '</div>' +
+    '<div class="cal-weekdays">'+headerDias+'</div>' +
+    '<div class="cal-grid">'+padCells+cells+'</div>' +
+    '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados.</div>' +
+    diaSelInfo
+  );
+}
+
 function viewPedidos(){
   var pend = pedidosPendentes();
   var resolvidos = STATE.pedidos.filter(function(p){return p.status!=='pendente';})
@@ -1372,6 +1517,24 @@ function bindEvents(){
   });
   var bulkTurnoBtn = $('[data-bulk-punch-turno]');
   if(bulkTurnoBtn) bulkTurnoBtn.addEventListener('click', function(){ bulkPunchTurno(); });
+
+  // Calendário view
+  var calendarioBusca = $('#calendario-busca');
+  if(calendarioBusca) calendarioBusca.addEventListener('input', function(){ UI.calendarioBusca = calendarioBusca.value; render(); preserveFocus('#calendario-busca'); });
+  $all('[data-select-calendario]').forEach(function(item){
+    item.addEventListener('click', function(){
+      UI.calendarioDiaSel = null;
+      toggleAccordion('calendarioAlunoId', item.getAttribute('data-select-calendario'));
+      render();
+    });
+  });
+  $all('[data-cal-dia]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var key = btn.getAttribute('data-cal-dia');
+      UI.calendarioDiaSel = UI.calendarioDiaSel===key ? null : key;
+      render();
+    });
+  });
 
   // Pedidos view
   var formPedido = $('#form-pedido');
