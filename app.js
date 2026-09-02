@@ -548,6 +548,16 @@ function statusHojeTexto(id){
 /* ============================================================
    Exportação para Excel (SheetJS, carregado via CDN no index.html)
    ============================================================ */
+/* Texto de horas para a exportação — mesmo saldo da semana (contra a carga
+   horária cadastrada) já mostrado na coluna "Saldo da semana" da aba Alunos,
+   só que em texto simples de célula em vez de pill colorida. */
+function horasExportTexto(s){
+  var info = saldoSemanaInfo(s);
+  if(info.saldo === null) return 'Carga não definida';
+  if(info.saldo < 0) return '-' + fmtHoras(-info.saldo);
+  if(info.saldo > 0) return '+' + fmtHoras(info.saldo);
+  return '0h';
+}
 function exportarExcel(){
   if(typeof XLSX === 'undefined'){
     toast('Não foi possível carregar a biblioteca de exportação. Verifique sua conexão e tente novamente.', 'err');
@@ -560,59 +570,12 @@ function exportarExcel(){
     return {
       'Nome': s.nome,
       'RA': s.ra || '',
-      'Setor': setorNome(s.setor),
-      'Nível': nivelLabel(s.nivel),
-      'Bolsa': s.bolsa || '',
-      'Carga horária (h/sem)': (s.horasSemana===null || s.horasSemana===undefined) ? '' : s.horasSemana,
-      'Dias de trabalho': s.diasTrabalho || '',
-      'Telefone': s.telefone || '',
-      'Aniversário': s.aniversario ? fmtDateBR(s.aniversario) : '',
-      'Curso': s.curso || '',
-      'Pendência herdada (planilha)': s.pendenteHerdada || '',
-      'Horas no sistema': fmtHoras(minutosTrabalhados(s.id)),
-      'Pontos': pontosDoAluno(s.id),
-      'Status hoje': statusHojeTexto(s.id),
-      'Ativo': s.ativo ? 'Sim' : 'Não',
-      'Observações': s.observacao || ''
+      'Horas (saldo da semana)': horasExportTexto(s)
     };
   });
   var wsAlunos = XLSX.utils.json_to_sheet(alunosData);
-  wsAlunos['!cols'] = [{wch:28},{wch:12},{wch:16},{wch:14},{wch:10},{wch:14},{wch:16},{wch:14},{wch:12},{wch:22},{wch:20},{wch:16},{wch:8},{wch:24},{wch:8},{wch:30}];
+  wsAlunos['!cols'] = [{wch:28},{wch:12},{wch:22}];
   XLSX.utils.book_append_sheet(wb, wsAlunos, 'Alunos');
-
-  var registrosData = STATE.registros.slice().sort(function(a,b){ return new Date(a.ts) - new Date(b.ts); }).map(function(r){
-    var s = studentById(r.studentId);
-    return {
-      'Aluno': s ? s.nome : '(removido)',
-      'Setor': s ? setorNome(s.setor) : '',
-      'Tipo': r.tipo==='entrada' ? 'Chegada' : 'Saída',
-      'Data': r.ts ? fmtDateBR(r.ts.slice(0,10)) : '',
-      'Hora': fmtTime(r.ts),
-      'Origem': r.origem || ''
-    };
-  });
-  var wsRegistros = XLSX.utils.json_to_sheet(registrosData);
-  wsRegistros['!cols'] = [{wch:28},{wch:16},{wch:10},{wch:12},{wch:8},{wch:16}];
-  XLSX.utils.book_append_sheet(wb, wsRegistros, 'Registros de ponto');
-
-  var pedidosData = STATE.pedidos.slice().sort(function(a,b){ return new Date(a.criadoEm) - new Date(b.criadoEm); }).map(function(p){
-    var s = studentById(p.studentId);
-    return {
-      'Aluno': s ? s.nome : '(removido)',
-      'Setor': s ? setorNome(s.setor) : '',
-      'Data do ajuste': fmtDateBR(p.data),
-      'Tipo': p.tipoAlvo==='entrada' ? 'Chegada' : 'Saída',
-      'Horário': p.horario || '',
-      'Motivo': p.motivo || '',
-      'Status': p.status==='pendente' ? 'Pendente' : p.status==='aprovado' ? 'Aprovado' : 'Rejeitado',
-      'Criado em': fmtDateTime(p.criadoEm),
-      'Resolvido em': p.resolvidoEm ? fmtDateTime(p.resolvidoEm) : '',
-      'Resolvido por': p.resolvidoPor || ''
-    };
-  });
-  var wsPedidos = XLSX.utils.json_to_sheet(pedidosData);
-  wsPedidos['!cols'] = [{wch:28},{wch:16},{wch:14},{wch:10},{wch:10},{wch:32},{wch:12},{wch:16},{wch:16},{wch:18}];
-  XLSX.utils.book_append_sheet(wb, wsPedidos, 'Pedidos de ajuste');
 
   var filename = 'trabalho-educativo-' + todayKey() + '.xlsx';
   try{
@@ -1200,12 +1163,12 @@ function viewConfig(){
       : '') +
 
     (UI.configTab==='exportar' ?
-      '<div class="card"><div class="card-head"><h2>Exportar para Excel</h2><span class="meta">gera um arquivo .xlsx com 3 planilhas</span></div><div class="card-body">' +
-      '<p class="view-sub">O arquivo baixado traz três planilhas com todos os dados atuais do sistema:</p>' +
+      '<div class="card"><div class="card-head"><h2>Exportar para Excel</h2><span class="meta">gera um arquivo .xlsx só com o essencial</span></div><div class="card-body">' +
+      '<p class="view-sub">O arquivo baixado traz uma planilha com um aluno por linha e apenas:</p>' +
       '<ul style="margin:10px 0 18px 18px;font-size:13px;color:var(--ink-soft);display:flex;flex-direction:column;gap:4px;">' +
-        '<li><b>Alunos</b> — cadastro completo, setor, nível, bolsa, carga horária, horas cumpridas, pontos e status de hoje.</li>' +
-        '<li><b>Registros de ponto</b> — todas as chegadas e saídas já registradas no sistema.</li>' +
-        '<li><b>Pedidos de ajuste</b> — histórico de pedidos, com status e quem aprovou ou rejeitou.</li>' +
+        '<li><b>Nome</b></li>' +
+        '<li><b>RA</b></li>' +
+        '<li><b>Horas</b> — saldo da semana atual: horas feitas a mais (ex.: "+2h") ou horas negativas, faltando cumprir (ex.: "-3h").</li>' +
       '</ul>' +
       '<button class="btn btn-primary" data-action="exportar-excel">⇩ Baixar Excel (.xlsx)</button>' +
       '</div></div>'
