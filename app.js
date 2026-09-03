@@ -1030,7 +1030,9 @@ function calendarioAluno(s){
       var regsDia = registrosDoAlunoNoDia(s.id, dSel);
       var minsDia = minutosNoDia(s.id, dSel);
       var itens = regsDia.map(function(r){
-        return '<div class="log-item"><span class="t">'+fmtTime(r.ts)+'</span><span>'+(r.tipo==='entrada'?'Chegada':'Saída')+' · <span style="color:var(--muted);">'+esc(r.origem||'')+'</span></span></div>';
+        return '<div class="log-item"><span class="t">'+fmtTime(r.ts)+'</span><span style="flex:1;">'+(r.tipo==='entrada'?'Chegada':'Saída')+' · <span style="color:var(--muted);">'+esc(r.origem||'')+'</span></span>' +
+          '<button class="btn btn-sm btn-ghost" data-cal-del-registro="'+r.id+'" type="button" title="Excluir este registro">Excluir</button>' +
+        '</div>';
       }).join('') || '<div class="empty-state">Nenhum registro nesse dia.</div>';
       diaSelInfo =
         '<div class="card" style="margin-top:14px;">' +
@@ -1498,6 +1500,26 @@ function bindEvents(){
       render();
     });
   });
+  $all('[data-cal-del-registro]').forEach(function(btn){
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var id = btn.getAttribute('data-cal-del-registro');
+      var registro = STATE.registros.filter(function(r){ return r.id===id; })[0];
+      if(!registro) return;
+      removeRegistro(id);
+      logAtividade((registro.tipo==='entrada'?'Chegada':'Saída')+' de '+fmtDateTime(registro.ts)+' excluída manualmente.');
+      toast('Registro excluído.', null, {
+        actionLabel: 'Desfazer',
+        onAction: function(){
+          addRegistro(registro);
+          logAtividade('Exclusão de registro desfeita.');
+          toast('Exclusão desfeita.');
+          persist();
+        }
+      });
+      persist();
+    });
+  });
 
   // Pedidos view
   var formPedido = $('#form-pedido');
@@ -1606,6 +1628,19 @@ function resolvePedido(id, status, respPor){
   if(status==='aprovado'){
     var ts = p.data + 'T' + p.horario + ':00';
     var d = new Date(ts);
+    // Se já existe exatamente 1 registro do mesmo tipo (chegada/saída) nesse
+    // mesmo dia, o pedido normalmente é uma CORREÇÃO daquele horário (ex.:
+    // bateu o ponto errado e pediu o ajuste) — troca o antigo pelo horário
+    // aprovado, em vez de duplicar. Se não existir nenhum, é o caso comum de
+    // "esqueci de bater o ponto": só adiciona. Com 2+ já registrados nesse
+    // dia (ex.: mais de um turno) é ambíguo demais para apagar sozinho — só
+    // adiciona, e quem aprovou decide se precisa remover algum manualmente.
+    var mesmoTipoNoDia = STATE.registros.filter(function(r){
+      return r.studentId === p.studentId && r.tipo === p.tipoAlvo && sameDay(r.ts, d);
+    });
+    if(mesmoTipoNoDia.length === 1){
+      removeRegistro(mesmoTipoNoDia[0].id);
+    }
     addRegistro({id: uid('r'), studentId: p.studentId, tipo: p.tipoAlvo, ts: d.toISOString(), origem:'ajuste-aprovado'});
     logAtividade('Pedido de ajuste de '+(s?s.nome:'')+' aprovado por '+respPor+'.');
     toast('Pedido aprovado e ponto ajustado.');
