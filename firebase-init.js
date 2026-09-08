@@ -9,7 +9,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence,
-  createUserWithEmailAndPassword, deleteUser
+  createUserWithEmailAndPassword, deleteUser, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
   getFirestore, doc, setDoc, updateDoc, deleteDoc, getDoc, onSnapshot, collection, query, where, writeBatch
@@ -81,12 +81,18 @@ var signupForm = document.getElementById('signup-form');
 var signupError = document.getElementById('signup-error');
 var showSignupLink = document.getElementById('show-signup');
 var showLoginLink = document.getElementById('show-login');
+var forgotForm = document.getElementById('forgot-form');
+var forgotError = document.getElementById('forgot-error');
+var forgotSuccess = document.getElementById('forgot-success');
+var showForgotLink = document.getElementById('show-forgot');
+var showLoginFromForgotLink = document.getElementById('show-login-from-forgot');
 
 function showLogin(msg){
   loginScreen.hidden = false;
   appRoot.hidden = true;
   loginForm.hidden = false;
   signupForm.hidden = true;
+  if(forgotForm) forgotForm.hidden = true;
   if(msg){ loginError.textContent = msg; loginError.hidden = false; }
   else { loginError.hidden = true; }
 }
@@ -95,8 +101,19 @@ function showSignupScreen(msg){
   appRoot.hidden = true;
   loginForm.hidden = true;
   signupForm.hidden = false;
+  if(forgotForm) forgotForm.hidden = true;
   if(msg){ signupError.textContent = msg; signupError.hidden = false; }
   else { signupError.hidden = true; }
+}
+function showForgotScreen(){
+  loginScreen.hidden = false;
+  appRoot.hidden = true;
+  loginForm.hidden = true;
+  signupForm.hidden = true;
+  forgotForm.hidden = false;
+  forgotError.hidden = true;
+  forgotSuccess.hidden = true;
+  forgotForm.reset();
 }
 function showApp(){
   loginScreen.hidden = true;
@@ -127,6 +144,41 @@ if(showSignupLink) showSignupLink.addEventListener('click', function(e){
 if(showLoginLink) showLoginLink.addEventListener('click', function(e){
   e.preventDefault();
   showLogin();
+});
+if(showForgotLink) showForgotLink.addEventListener('click', function(e){
+  e.preventDefault();
+  showForgotScreen();
+});
+if(showLoginFromForgotLink) showLoginFromForgotLink.addEventListener('click', function(e){
+  e.preventDefault();
+  showLogin();
+});
+if(forgotForm) forgotForm.addEventListener('submit', function(e){
+  e.preventDefault();
+  var fd = new FormData(forgotForm);
+  var email = (fd.get('email') || '').trim();
+  var btn = forgotForm.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  forgotError.hidden = true;
+  forgotSuccess.hidden = true;
+  sendPasswordResetEmail(auth, email).then(function(){
+    forgotSuccess.textContent = 'Enviamos um e-mail para ' + email + ' com um link para redefinir a senha. Confira também a caixa de spam.';
+    forgotSuccess.hidden = false;
+  }).catch(function(err){
+    // Por segurança, não confirmamos se o e-mail existe ou não no sistema —
+    // mesma mensagem de sucesso mesmo se o e-mail não estiver cadastrado
+    // (evita que alguém use esta tela para descobrir e-mails cadastrados).
+    // Só avisamos de verdade quando o e-mail é claramente inválido.
+    if(err && err.code === 'auth/invalid-email'){
+      forgotError.textContent = 'Digite um e-mail válido.';
+      forgotError.hidden = false;
+    } else {
+      forgotSuccess.textContent = 'Se esse e-mail estiver cadastrado, enviamos um link para redefinir a senha. Confira também a caixa de spam.';
+      forgotSuccess.hidden = false;
+    }
+  }).finally(function(){
+    btn.disabled = false;
+  });
 });
 
 /* ============================================================

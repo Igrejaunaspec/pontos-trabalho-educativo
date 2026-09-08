@@ -18,7 +18,19 @@
     <label>Senha<input type="password" name="password" required autocomplete="current-password"></label>
     <div class="login-error" id="login-error" hidden></div>
     <button class="btn btn-primary" type="submit">Entrar</button>
+    <div class="login-switch"><a href="#" id="show-forgot">Esqueci minha senha</a></div>
     <div class="login-switch">Aluno da faculdade e ainda não tem login? <a href="#" id="show-signup">Cadastre-se com seu RA</a></div>
+  </form>
+
+  <form id="forgot-form" class="login-card" hidden>
+    <div class="login-brand">Trabalho Educativo</div>
+    <div class="login-sub">Redefinir senha</div>
+    <p class="login-switch" style="margin:0 0 -6px;">Informe o e-mail do seu login. Vamos enviar um link para você criar uma senha nova.</p>
+    <label>E-mail<input type="email" name="email" required autocomplete="username"></label>
+    <div class="login-error" id="forgot-error" hidden></div>
+    <div class="login-success" id="forgot-success" hidden></div>
+    <button class="btn btn-primary" type="submit">Enviar link de redefinição</button>
+    <div class="login-switch"><a href="#" id="show-login-from-forgot">Voltar para o login</a></div>
   </form>
 
   <form id="signup-form" class="login-card" hidden>
