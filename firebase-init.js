@@ -210,6 +210,10 @@ signupForm.addEventListener('submit', function(e){
   if(password.length < 6){ showSignupScreen('A senha precisa ter pelo menos 6 caracteres.'); return; }
   if(password !== password2){ showSignupScreen('As senhas não coincidem.'); return; }
 
+  // Evita duplo envio (duplo toque no celular, tecla Enter repetida etc.):
+  // sem isso, dois envios quase simultâneos podem criar a conta com sucesso
+  // no primeiro envio e mostrar um erro confuso no segundo.
+  if(btn.disabled) return;
   btn.disabled = true;
   signupError.hidden = true;
   suppressAuthHandling = true; // segura o onAuthStateChanged até o vínculo terminar
@@ -250,6 +254,10 @@ signupForm.addEventListener('submit', function(e){
       msg = 'Senha muito fraca. Use pelo menos 6 caracteres.';
     } else if(err && err.code === 'auth/invalid-email'){
       msg = 'E-mail inválido.';
+    } else if(err && err.code === 'auth/network-request-failed'){
+      msg = 'Falha de conexão com a internet. Verifique o sinal/wifi e tente novamente.';
+    } else if(err && err.code === 'auth/too-many-requests'){
+      msg = 'Muitas tentativas seguidas. Aguarde alguns minutos e tente novamente.';
     } else if(err && (err.code === 'permission-denied' || (err.message||'').indexOf('permission') !== -1)){
       msg = 'Este RA já tem um login cadastrado. Fale com a administração se isso não deveria acontecer.';
     }
