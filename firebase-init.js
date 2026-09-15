@@ -12,7 +12,7 @@ import {
   createUserWithEmailAndPassword, deleteUser, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
-  getFirestore, doc, setDoc, updateDoc, deleteDoc, getDoc, onSnapshot, collection, query, where, writeBatch
+  getFirestore, doc, setDoc, updateDoc, deleteDoc, getDoc, getDocs, onSnapshot, collection, query, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 var firebaseConfig = {
@@ -394,6 +394,78 @@ window.__pontosRejeitarCadastro = function(uidCadastro){
     .then(function(){
       return deleteDoc(doc(db, 'cadastrosPendentes', uidCadastro));
     });
+};
+
+/* ============================================================
+   Corrigir cadastros duplicados (ferramenta de manutenção, botão
+   "Corrigir cadastros duplicados" na aba Alunos — ver app.js). O
+   app.js já identificou os pares {stubId, officialId}: um cadastro
+   "fantasma" (studentId gerado, ex. "s_xxxxx") que deve ser
+   substituído pelo cadastro "oficial" correspondente (mesmo RA).
+   Aqui migra, para cada par: todo registro de ponto do fantasma
+   passa a apontar pro oficial; o login (alunoAuth) que estava
+   ligado ao fantasma passa a apontar pro oficial; alunoClaimed do
+   oficial é marcado com esse login; e o alunoClaimed do fantasma é
+   removido. Não mexe na coleção "students" — quem chama marca o
+   cadastro fantasma como inativo e salva pelo caminho normal
+   (persist()/__pontosSaveState), para manter um único jeito de
+   gravar perfil de aluno.
+   Devolve {paresCorrigidos, registrosMigrados, loginsVinculados}.
+   ============================================================ */
+window.__pontosCorrigirDuplicados = function(pares){
+  if(!pares || !pares.length){
+    return Promise.resolve({paresCorrigidos:0, registrosMigrados:0, loginsVinculados:0});
+  }
+  return Promise.all([
+    getDocs(collection(db, 'alunoAuth')),
+    getDocs(collection(db, 'registros'))
+  ]).then(function(results){
+    var authSnap = results[0], regSnap = results[1];
+    var authPorStudentId = {};
+    authSnap.forEach(function(d){
+      var data = d.data();
+      if(data && data.studentId) authPorStudentId[data.studentId] = d.id;
+    });
+    var regsPorStudentId = {};
+    regSnap.forEach(function(d){
+      var data = d.data();
+      if(!data || !data.studentId) return;
+      (regsPorStudentId[data.studentId] = regsPorStudentId[data.studentId] || []).push(d.id);
+    });
+
+    var ops = []; // {ref, data|null} — null = excluir
+    var registrosMigrados = 0, loginsVinculados = 0;
+    pares.forEach(function(par){
+      (regsPorStudentId[par.stubId] || []).forEach(function(regId){
+        ops.push({ref: doc(db, 'registros', regId), data: {studentId: par.officialId}});
+        registrosMigrados++;
+      });
+      var uidLogado = authPorStudentId[par.stubId];
+      if(uidLogado){
+        ops.push({ref: doc(db, 'alunoAuth', uidLogado), data: {studentId: par.officialId}});
+        ops.push({ref: doc(db, 'alunoClaimed', par.officialId), data: {uid: uidLogado, claimadoEm: new Date().toISOString()}});
+        loginsVinculados++;
+      }
+      ops.push({ref: doc(db, 'alunoClaimed', par.stubId), data: null});
+    });
+
+    var chunks = [];
+    for(var i=0; i<ops.length; i+=400){ chunks.push(ops.slice(i, i+400)); }
+    var chain = Promise.resolve();
+    chunks.forEach(function(chunk){
+      chain = chain.then(function(){
+        var batch = writeBatch(db);
+        chunk.forEach(function(op){
+          if(op.data === null) batch.delete(op.ref);
+          else batch.set(op.ref, op.data, {merge: true});
+        });
+        return batch.commit();
+      });
+    });
+    return chain.then(function(){
+      return {paresCorrigidos: pares.length, registrosMigrados: registrosMigrados, loginsVinculados: loginsVinculados};
+    });
+  });
 };
 
 /* Mantém "alunoRA/{ra}" -> {studentId} em dia para os bolsistas da
