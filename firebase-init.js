@@ -398,20 +398,56 @@ window.__pontosRejeitarCadastro = function(uidCadastro){
 
 /* ============================================================
    Corrigir cadastros duplicados (ferramenta de manutenção, botão
-   "Corrigir cadastros duplicados" na aba Alunos — ver app.js). O
-   app.js já identificou os pares {stubId, officialId}: um cadastro
-   "fantasma" (studentId gerado, ex. "s_xxxxx") que deve ser
-   substituído pelo cadastro "oficial" correspondente (mesmo RA).
-   Aqui migra, para cada par: todo registro de ponto do fantasma
-   passa a apontar pro oficial; o login (alunoAuth) que estava
-   ligado ao fantasma passa a apontar pro oficial; alunoClaimed do
-   oficial é marcado com esse login; e o alunoClaimed do fantasma é
-   removido. Não mexe na coleção "students" — quem chama marca o
-   cadastro fantasma como inativo e salva pelo caminho normal
-   (persist()/__pontosSaveState), para manter um único jeito de
-   gravar perfil de aluno.
+   "Corrigir cadastros duplicados" na aba Alunos — ver app.js).
+
+   window.__pontosDetectarDuplicados() lê a coleção "students" do
+   Firestore DIRETO (não app/state.students, que é só a lista que a
+   tela de Alunos mostra) — os cadastros "fantasma" (studentId
+   gerado, ex. "s_xxxxx") em geral nunca foram salvos dentro de
+   app/state.students, só existem soltos na coleção, então só
+   aparecem lendo a coleção inteira. Agrupa por RA e separa, em cada
+   grupo, o cadastro "oficial" (id no formato "sNN-nome") dos
+   "fantasmas" (id "s_xxxxx"); devolve {pares, manual} — pares é a
+   lista de {stubId, officialId, nome, ra} prontos pra corrigir, e
+   manual é os grupos com RA repetido sem um oficial claro (ex.: duas
+   contas fantasma da mesma pessoa), que ficam de fora da correção
+   automática.
+
+   window.__pontosCorrigirDuplicados(pares) migra, para cada par:
+   todo registro de ponto do fantasma passa a apontar pro oficial; o
+   login (alunoAuth) que estava ligado ao fantasma passa a apontar
+   pro oficial; alunoClaimed do oficial é marcado com esse login; o
+   alunoClaimed do fantasma é removido; e o próprio documento
+   students/{fantasma} é marcado ativo:false com uma observação —
+   direto na coleção, já que ele normalmente não está dentro de
+   app/state.students pra ser desativado pelo caminho normal
+   (persist()/__pontosSaveState).
    Devolve {paresCorrigidos, registrosMigrados, loginsVinculados}.
    ============================================================ */
+window.__pontosDetectarDuplicados = function(){
+  return getDocs(collection(db, 'students')).then(function(snap){
+    var porRA = {};
+    snap.forEach(function(d){
+      var s = Object.assign({}, d.data(), {id: d.id});
+      var ra = String(s.ra||'').trim();
+      if(!ra || s.ativo===false) return;
+      (porRA[ra] = porRA[ra] || []).push(s);
+    });
+    var pares = [], manual = [];
+    Object.keys(porRA).forEach(function(ra){
+      var grupo = porRA[ra];
+      if(grupo.length < 2) return;
+      var oficiais = grupo.filter(function(s){ return !/^s_/.test(s.id); });
+      var fantasmas = grupo.filter(function(s){ return /^s_/.test(s.id); });
+      if(oficiais.length===1 && fantasmas.length>=1){
+        fantasmas.forEach(function(f){ pares.push({stubId: f.id, officialId: oficiais[0].id, nome: oficiais[0].nome, ra: ra}); });
+      } else {
+        manual.push({ra: ra, nomes: grupo.map(function(s){return s.nome;})});
+      }
+    });
+    return {pares: pares, manual: manual};
+  });
+};
 window.__pontosCorrigirDuplicados = function(pares){
   if(!pares || !pares.length){
     return Promise.resolve({paresCorrigidos:0, registrosMigrados:0, loginsVinculados:0});
@@ -435,6 +471,7 @@ window.__pontosCorrigirDuplicados = function(pares){
 
     var ops = []; // {ref, data|null} — null = excluir
     var registrosMigrados = 0, loginsVinculados = 0;
+    var hoje = new Date().toISOString().slice(0,10);
     pares.forEach(function(par){
       (regsPorStudentId[par.stubId] || []).forEach(function(regId){
         ops.push({ref: doc(db, 'registros', regId), data: {studentId: par.officialId}});
@@ -447,6 +484,10 @@ window.__pontosCorrigirDuplicados = function(pares){
         loginsVinculados++;
       }
       ops.push({ref: doc(db, 'alunoClaimed', par.stubId), data: null});
+      ops.push({ref: doc(db, 'students', par.stubId), data: {
+        ativo: false,
+        observacao: 'Cadastro duplicado (mesmo RA '+par.ra+') — mesclado com '+par.officialId+' em '+hoje+' pela ferramenta "Corrigir cadastros duplicados".'
+      }});
     });
 
     var chunks = [];

@@ -616,76 +616,58 @@ function exportarExcel(){
 /* ============================================================
    Corrigir cadastros duplicados — ferramenta de manutenção (botão
    na aba Alunos). Alguns alunos acabaram com DOIS cadastros: o
-   "oficial" (importado da planilha, id no formato "sNN-nome") e um
-   "fantasma" (id gerado automaticamente, formato "s_xxxxx"), criado
-   quando alguém aprovou o autocadastro por RA de uma pessoa sem
-   perceber que já existia um cadastro oficial com aquele RA. O
-   login dessa pessoa fica ligado ao fantasma, então os pontos que
-   ela bate somem da visão da administração (que olha o oficial).
-   Esta ferramenta identifica os pares oficial+fantasma pelo RA em
-   comum, e — só depois de confirmação — religa o login e migra os
-   registros de ponto do fantasma pro oficial (ver
-   window.__pontosCorrigirDuplicados em firebase-init.js).
+   "oficial" (importado da planilha, id no formato "sNN-nome",
+   listado normalmente em Alunos) e um "fantasma" (id gerado
+   automaticamente, formato "s_xxxxx"), criado quando alguém aprovou
+   o autocadastro por RA de uma pessoa sem perceber que já existia
+   um cadastro oficial com aquele RA. O login dessa pessoa fica
+   ligado ao fantasma, então os pontos que ela bate somem da visão
+   da administração (que olha o oficial).
+
+   Importante: o fantasma normalmente NÃO aparece na lista de Alunos
+   nem entra na contagem de bolsistas — ele existe só como documento
+   solto na coleção "students" do Firestore (nunca foi salvo dentro
+   de app/state.students, que é de onde a tela de Alunos lê). Por
+   isso a busca dos pares precisa ler a coleção direto do Firestore
+   (window.__pontosDetectarDuplicados, em firebase-init.js) em vez
+   de STATE.students — senão a ferramenta não encontra nada, mesmo
+   havendo duplicados.
    ============================================================ */
-function detectarCadastrosDuplicados(){
-  var porRA = {};
-  STATE.students.forEach(function(s){
-    var ra = String(s.ra||'').trim();
-    if(!ra || s.ativo===false) return;
-    (porRA[ra] = porRA[ra] || []).push(s);
-  });
-  var pares = [], manual = [];
-  Object.keys(porRA).forEach(function(ra){
-    var grupo = porRA[ra];
-    if(grupo.length < 2) return;
-    var oficiais = grupo.filter(function(s){ return !/^s_/.test(s.id); });
-    var fantasmas = grupo.filter(function(s){ return /^s_/.test(s.id); });
-    if(oficiais.length===1 && fantasmas.length>=1){
-      fantasmas.forEach(function(f){ pares.push({stubId: f.id, officialId: oficiais[0].id, nome: oficiais[0].nome, ra: ra}); });
-    } else {
-      manual.push({ra: ra, nomes: grupo.map(function(s){return s.nome;})});
-    }
-  });
-  return {pares: pares, manual: manual};
-}
 function corrigirCadastrosDuplicados(){
-  var resultado = detectarCadastrosDuplicados();
-  var pares = resultado.pares, manual = resultado.manual;
-  if(!pares.length){
-    toast(manual.length
-      ? (manual.length+' caso(s) de RA repetido precisam de revisão manual (mais de um cadastro com o mesmo RA, nenhum claramente "oficial"): '+manual.map(function(m){return m.nomes.join(' / ');}).join('; ')+'.')
-      : 'Nenhum cadastro duplicado encontrado. 🎉', null, {duration: 9000});
+  if(typeof window.__pontosDetectarDuplicados !== 'function' || typeof window.__pontosCorrigirDuplicados !== 'function'){
+    toast('Não foi possível verificar agora. Verifique sua conexão.', 'err');
     return;
   }
-  var totalRegistros = pares.reduce(function(acc,p){ return acc + registrosDoAluno(p.stubId).length; }, 0);
-  var msg = pares.length+' cadastro'+(pares.length>1?'s duplicados encontrados':' duplicado encontrado')+
-    ' ('+totalRegistros+' registro'+(totalRegistros===1?'':'s')+' de ponto a religar ao cadastro oficial)' +
-    (manual.length ? '. Mais '+manual.length+' caso(s) precisam de revisão manual e não serão alterados agora.' : '.') +
-    ' Confirma a correção?';
-  toast(msg, null, {
-    actionLabel: 'Confirmar e corrigir',
-    duration: 20000,
-    onAction: function(){
-      if(typeof window.__pontosCorrigirDuplicados !== 'function'){
-        toast('Não foi possível corrigir agora. Verifique sua conexão.', 'err');
-        return;
-      }
-      toast('Corrigindo, aguarde…');
-      window.__pontosCorrigirDuplicados(pares).then(function(res){
-        pares.forEach(function(p){
-          var fantasma = studentById(p.stubId);
-          if(fantasma){
-            fantasma.ativo = false;
-            fantasma.observacao = 'Cadastro duplicado (mesmo RA '+p.ra+' do cadastro '+p.officialId+') — corrigido automaticamente em '+todayKey()+' pela ferramenta "Corrigir cadastros duplicados".';
-          }
-        });
-        logAtividade('Corrigiu '+res.paresCorrigidos+' cadastro(s) duplicado(s): '+res.registrosMigrados+' registro(s) de ponto e '+res.loginsVinculados+' login(s) religados ao cadastro oficial.');
-        toast(res.paresCorrigidos+' cadastro(s) corrigido(s): '+res.registrosMigrados+' registro(s) migrado(s), '+res.loginsVinculados+' login(s) religado(s) ao cadastro certo.', null, {duration: 8000});
-        persist();
-      }).catch(function(err){
-        toast('Falha ao corrigir os cadastros. Tente novamente ou avise a administração técnica.', 'err');
-      });
+  toast('Verificando cadastros…');
+  window.__pontosDetectarDuplicados().then(function(resultado){
+    var pares = resultado.pares, manual = resultado.manual;
+    if(!pares.length){
+      toast(manual.length
+        ? (manual.length+' caso(s) de RA repetido precisam de revisão manual (mais de um cadastro com o mesmo RA, nenhum claramente "oficial"): '+manual.map(function(m){return m.nomes.join(' / ');}).join('; ')+'.')
+        : 'Nenhum cadastro duplicado encontrado. 🎉', null, {duration: 9000});
+      return;
     }
+    var totalRegistros = pares.reduce(function(acc,p){ return acc + registrosDoAluno(p.stubId).length; }, 0);
+    var msg = pares.length+' cadastro'+(pares.length>1?'s duplicados encontrados':' duplicado encontrado')+
+      ' ('+totalRegistros+' registro'+(totalRegistros===1?'':'s')+' de ponto a religar ao cadastro oficial)' +
+      (manual.length ? '. Mais '+manual.length+' caso(s) precisam de revisão manual e não serão alterados agora.' : '.') +
+      ' Confirma a correção?';
+    toast(msg, null, {
+      actionLabel: 'Confirmar e corrigir',
+      duration: 25000,
+      onAction: function(){
+        toast('Corrigindo, aguarde…');
+        window.__pontosCorrigirDuplicados(pares).then(function(res){
+          logAtividade('Corrigiu '+res.paresCorrigidos+' cadastro(s) duplicado(s): '+res.registrosMigrados+' registro(s) de ponto e '+res.loginsVinculados+' login(s) religados ao cadastro oficial.');
+          toast(res.paresCorrigidos+' cadastro(s) corrigido(s): '+res.registrosMigrados+' registro(s) migrado(s), '+res.loginsVinculados+' login(s) religado(s) ao cadastro certo.', null, {duration: 8000});
+          persist();
+        }).catch(function(err){
+          toast('Falha ao corrigir os cadastros. Tente novamente ou avise a administração técnica.', 'err');
+        });
+      }
+    });
+  }).catch(function(){
+    toast('Não foi possível verificar os cadastros agora. Verifique sua conexão.', 'err');
   });
 }
 
