@@ -454,9 +454,10 @@ window.__pontosCorrigirDuplicados = function(pares){
   }
   return Promise.all([
     getDocs(collection(db, 'alunoAuth')),
-    getDocs(collection(db, 'registros'))
+    getDocs(collection(db, 'registros')),
+    getDocs(collection(db, 'pedidos'))
   ]).then(function(results){
-    var authSnap = results[0], regSnap = results[1];
+    var authSnap = results[0], regSnap = results[1], pedSnap = results[2];
     var authPorStudentId = {};
     authSnap.forEach(function(d){
       var data = d.data();
@@ -468,14 +469,24 @@ window.__pontosCorrigirDuplicados = function(pares){
       if(!data || !data.studentId) return;
       (regsPorStudentId[data.studentId] = regsPorStudentId[data.studentId] || []).push(d.id);
     });
+    var pedidosPorStudentId = {};
+    pedSnap.forEach(function(d){
+      var data = d.data();
+      if(!data || !data.studentId) return;
+      (pedidosPorStudentId[data.studentId] = pedidosPorStudentId[data.studentId] || []).push(d.id);
+    });
 
     var ops = []; // {ref, data|null} — null = excluir
-    var registrosMigrados = 0, loginsVinculados = 0;
+    var registrosMigrados = 0, loginsVinculados = 0, pedidosMigrados = 0;
     var hoje = new Date().toISOString().slice(0,10);
     pares.forEach(function(par){
       (regsPorStudentId[par.stubId] || []).forEach(function(regId){
         ops.push({ref: doc(db, 'registros', regId), data: {studentId: par.officialId}});
         registrosMigrados++;
+      });
+      (pedidosPorStudentId[par.stubId] || []).forEach(function(pedId){
+        ops.push({ref: doc(db, 'pedidos', pedId), data: {studentId: par.officialId}});
+        pedidosMigrados++;
       });
       var uidLogado = authPorStudentId[par.stubId];
       if(uidLogado){
@@ -504,7 +515,130 @@ window.__pontosCorrigirDuplicados = function(pares){
       });
     });
     return chain.then(function(){
-      return {paresCorrigidos: pares.length, registrosMigrados: registrosMigrados, loginsVinculados: loginsVinculados};
+      return {paresCorrigidos: pares.length, registrosMigrados: registrosMigrados, loginsVinculados: loginsVinculados, pedidosMigrados: pedidosMigrados};
+    });
+  });
+};
+
+/* ============================================================
+   Sincronizar cadastros soltos (ferramenta de manutenção, botão
+   "Sincronizar cadastros soltos" na aba Alunos — ver app.js).
+
+   Alunos que se auto-cadastram pelo RA recebem um documento em
+   students/{s_xxxxx}, mas esse perfil só passa a aparecer na aba
+   Alunos (e contar no total de bolsistas) quando alguém completa o
+   cadastro pelo painel e ele é salvo dentro de app/state.students.
+   Se isso nunca acontece, o aluno continua batendo ponto e pedindo
+   ajustes normalmente (as regras de segurança permitem, pelo
+   próprio studentId) mas fica invisível pra administração — e é
+   por isso que o nome dele aparece como "—" nos Pedidos de ajuste:
+   a tela busca o nome em STATE.students (=app/state.students), não
+   na coleção "students" inteira.
+
+   window.__pontosDetectarCadastrosSoltos() é só leitura: devolve
+   {soltos, pedidosParaCorrigir} — soltos são os perfis ativos que
+   existem na coleção mas não em app/state.students (fora os IDs em
+   EXCLUIDOS_DA_SINCRONIA, que são casos tratados manualmente à
+   parte); pedidosParaCorrigir são pedidos cujo studentId aponta pra
+   um cadastro já mesclado por "Corrigir cadastros duplicados" antes
+   dessa ferramenta existir (por isso nunca foram migrados).
+
+   window.__pontosSincronizarCadastrosSoltos() refaz essas mesmas
+   contas e GRAVA: acrescenta os soltos a app/state.students e
+   corrige o studentId dos pedidos afetados — tudo num único batch.
+   ============================================================ */
+var EXCLUIDOS_DA_SINCRONIA = ['s_mtkiyqnkm67y6', 's_mtklhni6onno9']; // Marlon (duplicado, ver s_mtlyklxdk2wqb) + cadastro de teste da administração
+
+function calcularCadastrosSoltos(stateData, studSnap, pedSnap){
+  var students = (stateData.students || []).slice();
+  var stateIds = {};
+  students.forEach(function(s){ stateIds[s.id] = true; });
+
+  var mescladoMap = {};
+  studSnap.forEach(function(d){
+    var s = d.data();
+    if(s.ativo === false){
+      var m = /mesclado com (\S+) em/.exec(s.observacao||'');
+      if(m) mescladoMap[d.id] = m[1];
+    }
+  });
+
+  var soltos = [];
+  studSnap.forEach(function(d){
+    var s = Object.assign({}, d.data(), {id: d.id});
+    if(s.ativo === false) return;
+    if(stateIds[s.id]) return;
+    if(EXCLUIDOS_DA_SINCRONIA.indexOf(s.id) !== -1) return;
+    delete s.observacao;
+    soltos.push(s);
+  });
+
+  var pedidosParaCorrigir = [];
+  pedSnap.forEach(function(d){
+    var p = d.data();
+    if(!p.studentId) return;
+    var alvo = mescladoMap[p.studentId];
+    if(alvo && alvo !== p.studentId){
+      pedidosParaCorrigir.push({id: d.id, de: p.studentId, para: alvo});
+    }
+  });
+
+  return {students: students, soltos: soltos, pedidosParaCorrigir: pedidosParaCorrigir};
+}
+
+window.__pontosDetectarCadastrosSoltos = function(){
+  return Promise.all([
+    getDoc(STATE_DOC),
+    getDocs(collection(db, 'students')),
+    getDocs(collection(db, 'pedidos'))
+  ]).then(function(results){
+    var stateData = results[0].data() || {};
+    var calc = calcularCadastrosSoltos(stateData, results[1], results[2]);
+    return {soltos: calc.soltos, pedidosParaCorrigir: calc.pedidosParaCorrigir};
+  });
+};
+
+window.__pontosSincronizarCadastrosSoltos = function(){
+  return Promise.all([
+    getDoc(STATE_DOC),
+    getDocs(collection(db, 'students')),
+    getDocs(collection(db, 'pedidos')),
+    getDocs(collection(db, 'alunoAuth'))
+  ]).then(function(results){
+    var stateSnap = results[0], studSnap = results[1], pedSnap = results[2], authSnap = results[3];
+    var stateData = stateSnap.data() || {};
+    var calc = calcularCadastrosSoltos(stateData, studSnap, pedSnap);
+    var novaLista = calc.students.concat(calc.soltos);
+
+    var authParaRemover = [];
+    authSnap.forEach(function(d){
+      var data = d.data();
+      if(data && EXCLUIDOS_DA_SINCRONIA.indexOf(data.studentId) !== -1) authParaRemover.push(d.id);
+    });
+
+    var hoje = new Date().toISOString().slice(0,10);
+    var batch = writeBatch(db);
+    batch.set(STATE_DOC, Object.assign({}, stateData, {students: novaLista}));
+    batch.set(doc(db, 'students', 's_mtkiyqnkm67y6'), {
+      ativo: false,
+      observacao: 'Cadastro duplicado (mesmo RA 81816) — mesclado com s_mtlyklxdk2wqb em '+hoje+' pela ferramenta "Sincronizar cadastros soltos".'
+    }, {merge: true});
+    batch.set(doc(db, 'students', 's_mtklhni6onno9'), {
+      ativo: false,
+      observacao: 'Cadastro de teste (equipe de administração) desativado em '+hoje+' pela ferramenta "Sincronizar cadastros soltos".'
+    }, {merge: true});
+    authParaRemover.forEach(function(uid){ batch.delete(doc(db, 'alunoAuth', uid)); });
+    calc.pedidosParaCorrigir.forEach(function(p){
+      batch.update(doc(db, 'pedidos', p.id), {studentId: p.para});
+    });
+
+    return batch.commit().then(function(){
+      return {
+        cadastrosSincronizados: calc.soltos.length,
+        nomesSincronizados: calc.soltos.map(function(s){ return s.nome; }),
+        soltos: calc.soltos,
+        pedidosCorrigidos: calc.pedidosParaCorrigir.length
+      };
     });
   });
 };
