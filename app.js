@@ -658,8 +658,8 @@ function corrigirCadastrosDuplicados(){
       onAction: function(){
         toast('Corrigindo, aguarde…');
         window.__pontosCorrigirDuplicados(pares).then(function(res){
-          logAtividade('Corrigiu '+res.paresCorrigidos+' cadastro(s) duplicado(s): '+res.registrosMigrados+' registro(s) de ponto e '+res.loginsVinculados+' login(s) religados ao cadastro oficial.');
-          toast(res.paresCorrigidos+' cadastro(s) corrigido(s): '+res.registrosMigrados+' registro(s) migrado(s), '+res.loginsVinculados+' login(s) religado(s) ao cadastro certo.', null, {duration: 8000});
+          logAtividade('Corrigiu '+res.paresCorrigidos+' cadastro(s) duplicado(s): '+res.registrosMigrados+' registro(s) de ponto, '+res.pedidosMigrados+' pedido(s) de ajuste e '+res.loginsVinculados+' login(s) religados ao cadastro oficial.');
+          toast(res.paresCorrigidos+' cadastro(s) corrigido(s): '+res.registrosMigrados+' registro(s) e '+res.pedidosMigrados+' pedido(s) migrado(s), '+res.loginsVinculados+' login(s) religado(s) ao cadastro certo.', null, {duration: 8000});
           persist();
         }).catch(function(err){
           toast('Falha ao corrigir os cadastros. Tente novamente ou avise a administração técnica.', 'err');
@@ -668,6 +668,54 @@ function corrigirCadastrosDuplicados(){
     });
   }).catch(function(){
     toast('Não foi possível verificar os cadastros agora. Verifique sua conexão.', 'err');
+  });
+}
+
+/* ============================================================
+   Sincronizar cadastros soltos — ferramenta de manutenção (botão
+   "Sincronizar cadastros soltos" na aba Alunos). Ver comentário
+   detalhado em firebase-init.js junto de
+   window.__pontosDetectarCadastrosSoltos /
+   window.__pontosSincronizarCadastrosSoltos.
+   ============================================================ */
+function sincronizarCadastrosSoltos(){
+  if(typeof window.__pontosDetectarCadastrosSoltos !== 'function' || typeof window.__pontosSincronizarCadastrosSoltos !== 'function'){
+    toast('Não foi possível verificar agora. Verifique sua conexão.', 'err');
+    return;
+  }
+  toast('Verificando cadastros soltos…');
+  window.__pontosDetectarCadastrosSoltos().then(function(resultado){
+    var soltos = resultado.soltos, pedidosParaCorrigir = resultado.pedidosParaCorrigir;
+    if(!soltos.length && !pedidosParaCorrigir.length){
+      toast('Nenhum cadastro solto ou pedido de ajuste com nome pendente encontrado. 🎉', null, {duration: 6000});
+      return;
+    }
+    var msg = (soltos.length ? soltos.length+' cadastro'+(soltos.length>1?'s soltos encontrados':' solto encontrado')+' ('+soltos.map(function(s){return s.nome;}).join(', ')+')' : 'Nenhum cadastro solto novo') +
+      (pedidosParaCorrigir.length ? '. '+pedidosParaCorrigir.length+' pedido(s) de ajuste com nome pendente serão corrigidos.' : '.') +
+      ' Confirma?';
+    toast(msg, null, {
+      actionLabel: 'Confirmar e sincronizar',
+      duration: 25000,
+      onAction: function(){
+        toast('Sincronizando, aguarde…');
+        window.__pontosSincronizarCadastrosSoltos().then(function(res){
+          // A ferramenta já gravou os cadastros soltos e os pedidos corrigidos
+          // direto no Firestore (batch atômico); aqui só espelhamos o mesmo
+          // resultado no STATE local antes de persist(), pra não sobrescrever
+          // com a lista antiga de STATE.students (que ainda não tinha os soltos).
+          (res.soltos || []).forEach(function(s){
+            if(!STATE.students.some(function(x){ return x.id === s.id; })) STATE.students.push(s);
+          });
+          logAtividade('Sincronizou '+res.cadastrosSincronizados+' cadastro(s) solto(s) ('+res.nomesSincronizados.join(', ')+') e corrigiu '+res.pedidosCorrigidos+' pedido(s) de ajuste com nome pendente.');
+          toast(res.cadastrosSincronizados+' cadastro(s) sincronizado(s), '+res.pedidosCorrigidos+' pedido(s) corrigido(s).', null, {duration: 8000});
+          persist();
+        }).catch(function(err){
+          toast('Falha ao sincronizar os cadastros. Tente novamente ou avise a administração técnica.', 'err');
+        });
+      }
+    });
+  }).catch(function(){
+    toast('Não foi possível verificar os cadastros soltos agora. Verifique sua conexão.', 'err');
   });
 }
 
@@ -758,6 +806,7 @@ function viewAlunos(){
       '<div class="toolbar" style="gap:8px;">' +
         '<button class="btn btn-ghost" data-action="exportar-excel">⇩ Exportar Excel</button>' +
         '<button class="btn btn-ghost" data-action="corrigir-duplicados" title="Confere se algum aluno ficou com dois cadastros (um oficial e um criado por engano ao aprovar o autocadastro por RA) e liga o login ao cadastro certo.">⚠ Corrigir cadastros duplicados</button>' +
+        '<button class="btn btn-ghost" data-action="sincronizar-soltos" title="Confere se algum aluno que se autocadastrou pelo RA nunca entrou na lista de Alunos, e corrige o nome pendente (—) nos Pedidos de ajuste antigos.">🔄 Sincronizar cadastros soltos</button>' +
         '<button class="btn btn-primary" data-action="novo-aluno">+ Novo aluno</button>' +
       '</div></div>' +
 
@@ -1446,6 +1495,9 @@ function bindEvents(){
   });
   $all('[data-action="corrigir-duplicados"]').forEach(function(btn){
     btn.addEventListener('click', function(){ corrigirCadastrosDuplicados(); });
+  });
+  $all('[data-action="sincronizar-soltos"]').forEach(function(btn){
+    btn.addEventListener('click', function(){ sincronizarCadastrosSoltos(); });
   });
   $all('[data-open]').forEach(function(tr){
     tr.addEventListener('click', function(){ UI.drawerId = tr.getAttribute('data-open'); UI.drawerCreate=false; UI.drawerEdit = false; renderDrawer(); });
