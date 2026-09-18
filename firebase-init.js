@@ -643,6 +643,72 @@ window.__pontosSincronizarCadastrosSoltos = function(){
   });
 };
 
+/* ============================================================
+   Excluir cadastro permanentemente (botão "Excluir permanentemente"
+   no perfil do aluno — ver app.js). Diferente de "Desativar"
+   (reversível, só marca ativo:false e mantém tudo pra histórico),
+   isso APAGA de vez: o documento em students/{id}, todos os
+   registros de ponto, todos os pedidos de ajuste, o vínculo de
+   login (alunoAuth) se houver, o alunoClaimed/{id} e o
+   alunoRA/{ra} (se ainda apontar pra esse id) — e por último
+   remove o aluno de app/state.students.
+
+   Limite importante: isso só apaga dados do Firestore. A conta de
+   login em si (e-mail/senha) mora no Firebase Authentication, e o
+   app (rodando só no navegador, sem acesso de administrador do
+   Firebase Auth) não tem como apagar a conta de OUTRA pessoa por
+   ali — só a pessoa dona da conta consegue apagar a própria conta
+   (deleteUser(auth.currentUser), usado no cancelamento do próprio
+   cadastro). Depois dessa função rodar, a conta de e-mail/senha
+   continua existindo no Firebase Auth, só que órfã (sem nenhum
+   vínculo com studentId nenhum) — pra removê-la de vez é preciso
+   apagar manualmente em Console do Firebase → Authentication.
+
+   Devolve {registrosExcluidos, pedidosExcluidos, loginDesvinculado,
+   ra}.
+   ============================================================ */
+window.__pontosExcluirCadastro = function(id){
+  return Promise.all([
+    getDoc(doc(db, 'students', id)),
+    getDocs(query(collection(db, 'registros'), where('studentId', '==', id))),
+    getDocs(query(collection(db, 'pedidos'), where('studentId', '==', id))),
+    getDocs(query(collection(db, 'alunoAuth'), where('studentId', '==', id))),
+    getDoc(doc(db, 'alunoClaimed', id))
+  ]).then(function(results){
+    var studSnap = results[0], regSnap = results[1], pedSnap = results[2], authSnap = results[3], claimedSnap = results[4];
+    var ra = studSnap.exists() ? String((studSnap.data()||{}).ra || '').trim() : '';
+
+    var ops = [];
+    regSnap.forEach(function(d){ ops.push(doc(db, 'registros', d.id)); });
+    pedSnap.forEach(function(d){ ops.push(doc(db, 'pedidos', d.id)); });
+    authSnap.forEach(function(d){ ops.push(doc(db, 'alunoAuth', d.id)); });
+    if(claimedSnap.exists()) ops.push(doc(db, 'alunoClaimed', id));
+    ops.push(doc(db, 'students', id));
+
+    var registrosExcluidos = regSnap.size, pedidosExcluidos = pedSnap.size, loginDesvinculado = authSnap.size > 0;
+
+    var raCheck = ra ? getDoc(doc(db, 'alunoRA', ra)) : Promise.resolve(null);
+    return raCheck.then(function(raSnap){
+      if(raSnap && raSnap.exists() && raSnap.data().studentId === id){
+        ops.push(doc(db, 'alunoRA', ra));
+      }
+      var chunks = [];
+      for(var i=0; i<ops.length; i+=400){ chunks.push(ops.slice(i, i+400)); }
+      var chain = Promise.resolve();
+      chunks.forEach(function(chunk){
+        chain = chain.then(function(){
+          var batch = writeBatch(db);
+          chunk.forEach(function(ref){ batch.delete(ref); });
+          return batch.commit();
+        });
+      });
+      return chain.then(function(){
+        return {registrosExcluidos: registrosExcluidos, pedidosExcluidos: pedidosExcluidos, loginDesvinculado: loginDesvinculado, ra: ra};
+      });
+    });
+  });
+};
+
 /* Mantém "alunoRA/{ra}" -> {studentId} em dia para os bolsistas da
    faculdade (ativos), para permitir o auto-cadastro por RA. Roda uma
    vez por sessão do admin logado — escrita idempotente, barata. */
