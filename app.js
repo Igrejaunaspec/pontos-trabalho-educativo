@@ -110,16 +110,6 @@ function sameDay(iso, d){
   var b = d || new Date();
   return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
 }
-// Período do dia (local) de um horário: manhã (até 11h59), tarde (12h–17h59)
-// ou noite (18h em diante). Usado em resolvePedido() para decidir se um
-// pedido de ajuste aprovado é a CORREÇÃO de um ponto do mesmo turno ou um
-// turno DIFERENTE (ex.: entrada da manhã x entrada da tarde/noite).
-function periodoDoDia(d){
-  var h = d.getHours();
-  if(h < 12) return 'manha';
-  if(h < 18) return 'tarde';
-  return 'noite';
-}
 // Meia-noite local de hoje (ou do dia de "d"), como ISO — para usar como
 // limite de "desde o início do dia" em minutosTrabalhados(). Diferente de
 // todayKey()+'T00:00:00.000Z', que tratava a meia-noite LOCAL como se
@@ -668,7 +658,22 @@ function corrigirCadastrosDuplicados(){
       onAction: function(){
         toast('Corrigindo, aguarde…');
         window.__pontosCorrigirDuplicados(pares).then(function(res){
-          logAtividade('Corrigiu '+res.paresCorrigidos+' cadastro(s) duplicado(s): '+res.registrosMigrados+' registro(s) de ponto, '+res.pedidosMigrados+' pedido(s) de ajuste e '+res.loginsVinculados+' login(s) religados ao cadastro oficial.');
+          // A ferramenta já mesclou tudo direto no Firestore; aqui só
+          // espelhamos no STATE local: tira qualquer cópia do fantasma que
+          // tenha entrado em STATE.students (ex.: pela ferramenta
+          // "Sincronizar cadastros soltos") e preenche no oficial o RA/bolsa
+          // que a mesclagem completou, pra não sobrescrever com dados
+          // desatualizados no próximo persist().
+          var camposPreenchidos = 0;
+          pares.forEach(function(par){
+            STATE.students = STATE.students.filter(function(x){ return x.id !== par.stubId; });
+            var oficial = STATE.students.filter(function(x){ return x.id === par.officialId; })[0];
+            if(oficial && par.camposPreenchidos){
+              Object.assign(oficial, par.camposPreenchidos);
+              camposPreenchidos++;
+            }
+          });
+          logAtividade('Corrigiu '+res.paresCorrigidos+' cadastro(s) duplicado(s): '+res.registrosMigrados+' registro(s) de ponto, '+res.pedidosMigrados+' pedido(s) de ajuste e '+res.loginsVinculados+' login(s) religados ao cadastro oficial'+(camposPreenchidos?', '+camposPreenchidos+' cadastro(s) com RA/bolsa completados':'')+'.');
           toast(res.paresCorrigidos+' cadastro(s) corrigido(s): '+res.registrosMigrados+' registro(s) e '+res.pedidosMigrados+' pedido(s) migrado(s), '+res.loginsVinculados+' login(s) religado(s) ao cadastro certo.', null, {duration: 8000});
           persist();
         }).catch(function(err){
@@ -1848,28 +1853,16 @@ function resolvePedido(id, status, respPor){
   if(status==='aprovado'){
     var ts = p.data + 'T' + p.horario + ':00';
     var d = new Date(ts);
-    // Se já existe exatamente 1 registro do mesmo tipo (chegada/saída) nesse
-    // mesmo dia, o pedido normalmente é uma CORREÇÃO daquele horário (ex.:
-    // bateu o ponto errado e pediu o ajuste) — troca o antigo pelo horário
-    // aprovado, em vez de duplicar. Se não existir nenhum, é o caso comum de
-    // "esqueci de bater o ponto": só adiciona. Com 2+ já registrados nesse
-    // dia (ex.: mais de um turno) é ambíguo demais para apagar sozinho — só
-    // adiciona, e quem aprovou decide se precisa remover algum manualmente.
-    var mesmoTipoNoDia = STATE.registros.filter(function(r){
-      return r.studentId === p.studentId && r.tipo === p.tipoAlvo && sameDay(r.ts, d);
-    });
-    // Só tratamos como CORREÇÃO (substitui o registro antigo) quando há
-    // exatamente 1 registro do mesmo tipo nesse dia E ele está no MESMO
-    // PERÍODO (manhã/tarde/noite) do horário aprovado — sinal de que é o
-    // mesmo evento de ponto, só com o horário errado (ex.: bateu 07:58
-    // achando que era 08:00). Se o único registro existente for de outro
-    // período (ex.: já tem uma entrada de manhã e este pedido é de um turno
-    // à tarde ou à noite), é um evento DIFERENTE — só adicionamos, sem apagar
-    // o outro turno.
-    var candidato = mesmoTipoNoDia.length === 1 ? mesmoTipoNoDia[0] : null;
-    if(candidato && periodoDoDia(new Date(candidato.ts)) === periodoDoDia(d)){
-      removeRegistro(candidato.id);
-    }
+    // Aprovar um pedido SEMPRE adiciona o ponto — nunca apaga um registro
+    // existente automaticamente. Já tentamos duas heurísticas pra detectar
+    // quando um pedido era uma "correção" de um ponto batido errado (1
+    // registro do mesmo tipo no dia; depois, 1 registro no mesmo período do
+    // dia) e as duas acabaram apagando turnos de verdade em dias com vários
+    // turnos (ex.: duas saídas no mesmo período). Sem uma forma confiável de
+    // saber a intenção de quem pediu o ajuste, é mais seguro sempre somar e
+    // deixar quem aprova apagar manualmente um ponto duplicado (aba
+    // Calendário → dia → "Excluir") nos poucos casos em que for mesmo uma
+    // correção.
     addRegistro({id: uid('r'), studentId: p.studentId, tipo: p.tipoAlvo, ts: d.toISOString(), origem:'ajuste-aprovado'});
     logAtividade('Pedido de ajuste de '+(s?s.nome:'')+' aprovado por '+respPor+'.');
     toast('Pedido aprovado e ponto ajustado.');
