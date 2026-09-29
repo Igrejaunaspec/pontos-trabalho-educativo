@@ -1696,6 +1696,19 @@ function renderDrawer(){
   });
   var excluirBtn = $('[data-drawer-excluir]', overlay);
   if(excluirBtn) excluirBtn.addEventListener('click', function(){ excluirCadastroPermanente(s); });
+  var linkAcessoBtn = $('[data-drawer-link-acesso]', overlay);
+  if(linkAcessoBtn) linkAcessoBtn.addEventListener('click', function(){
+    var link = location.origin + location.pathname + '?ra=' + encodeURIComponent(s.ra) + '&nome=' + encodeURIComponent(s.nome);
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(link).then(function(){
+        toast('Link copiado! Mande pro '+s.nome+' — ele abre, confere o nome e cria a senha dele.');
+      }).catch(function(){
+        prompt('Copie o link de acesso de '+s.nome+':', link);
+      });
+    } else {
+      prompt('Copie o link de acesso de '+s.nome+':', link);
+    }
+  });
   var form = $('#form-perfil', overlay);
   if(form) form.addEventListener('submit', function(e){
     e.preventDefault();
@@ -1737,6 +1750,7 @@ function drawerView(s){
     '</div>' +
 
     '<div class="toolbar"><button class="btn btn-primary btn-sm" data-drawer-edit>Editar cadastro</button>' +
+      (s.ra ? '<button class="btn btn-sm" data-drawer-link-acesso title="Copia um link — mande pro aluno, ele abre, confirma o nome e cria a senha dele.">🔗 Copiar link de acesso</button>' : '<button class="btn btn-sm" disabled title="Preencha o RA no cadastro antes de gerar o link.">🔗 Copiar link de acesso</button>') +
       '<button class="btn btn-sm '+(s.ativo?'btn-danger':'')+'" data-drawer-toggle-ativo>'+(s.ativo?'Desativar':'Reativar')+'</button>' +
       '<button class="btn btn-sm btn-danger" data-drawer-excluir title="Apaga de vez o cadastro, o RA, os registros de ponto e os pedidos de ajuste. Diferente de \'Desativar\', não tem como desfazer.">🗑 Excluir permanentemente</button></div>' +
 
