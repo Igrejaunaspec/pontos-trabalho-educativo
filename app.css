@@ -466,10 +466,18 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
 .cal-cell.is-today{box-shadow:0 0 0 2px var(--accent);}
 .cal-cell.selected{background:var(--accent);}
 .cal-cell.selected .cal-daynum,.cal-cell.selected .cal-hours{color:var(--accent-ink);}
-/* Dia de trabalho combinado sem ponto batido, ou ponto batido num dia que não
-   era combinado (ver diasTrabalho no cadastro do aluno) — contorno vermelho. */
-.cal-cell.cal-alerta{box-shadow:inset 0 0 0 2px var(--critical);}
-.cal-cell.cal-alerta.is-today{box-shadow:inset 0 0 0 2px var(--critical),0 0 0 2px var(--accent);}
+/* Dia combinado de trabalho (ver diasTrabalho no cadastro do aluno) — contorno
+   vermelho, tenha ou não ponto batido. Comparado com o preenchido verde
+   (has-reg), dá pra ver de cara falta (contornado sem verde) e presença fora
+   do combinado (verde sem contorno, ver .cal-extra abaixo). */
+.cal-cell.cal-programado{box-shadow:inset 0 0 0 2px var(--critical);}
+.cal-cell.cal-programado.is-today{box-shadow:inset 0 0 0 2px var(--critical),0 0 0 2px var(--accent);}
+/* Ponto batido num dia que não era combinado — pontinho vermelho no canto,
+   além do preenchido verde normal (has-reg). */
+.cal-cell.cal-extra::after{
+  content:"";position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--critical);
+}
+.cal-cell{position:relative;}
 @media (max-width:520px){
   .cal-daynum{font-size:11px;}
   .cal-hours{font-size:9px;}
