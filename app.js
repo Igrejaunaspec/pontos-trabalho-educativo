@@ -285,6 +285,21 @@ function horasMesPassado(s){
   }
   return info;
 }
+/* Dias com registro e total de horas do mês ATUAL (dia 1 até hoje), mesma
+   contagem usada no calendário do admin (dia incompleto/sem par não soma) —
+   reaproveitado no painel do próprio aluno para os cards de resumo. */
+function resumoMesAtualAluno(s){
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0).getDate();
+  var totalDiasComRegistro = 0, totalMin = 0;
+  for(var dnum=1; dnum<=hoje.getDate(); dnum++){
+    var d = new Date(hoje.getFullYear(), hoje.getMonth(), dnum);
+    var mins = minutosNoDia(s.id, d);
+    if(registrosDoAlunoNoDia(s.id, d).length > 0) totalDiasComRegistro++;
+    totalMin += mins;
+  }
+  return {totalDiasComRegistro: totalDiasComRegistro, ultimoDiaMes: ultimoDiaMes, totalMin: totalMin, mesLabel: MESES[hoje.getMonth()]};
+}
 /* Registros de um aluno num dia específico (calendário local), já ordenados. */
 function registrosDoAlunoNoDia(id, d){
   var iniISO = localMidnightISO(d);
@@ -2158,6 +2173,20 @@ function viewAlunoPainel(){
     : fmtHoras(-saldoInfo.saldo) + ' devendo esta semana';
   var saldoCls = saldoInfo.cls;
 
+  var resumoMes = resumoMesAtualAluno(s);
+  var devidas = horasDevidasMesAtual(s);
+  var devidasCard = devidas.saldo===null ?
+    '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono">—</span><span class="hint">carga horária não definida</span></div>' :
+    devidas.saldo<0 ?
+      '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono" style="color:var(--danger,#d33);">'+fmtHoras(-devidas.saldo)+'</span><span class="hint">devendo até hoje</span></div>' :
+      '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono">Em dia</span><span class="hint">'+(devidas.saldo>0?'+'+fmtHoras(devidas.saldo)+' de folga':'—')+'</span></div>';
+
+  var mesPass = horasMesPassado(s);
+  var mesPassadoCard =
+    '<div class="stat-card"><span class="label">Horas do mês passado</span><span class="value mono">'+fmtHoras(mesPass.minsTrabalhados)+'</span>' +
+      '<span class="hint">'+(mesPass.saldo===null ? 'total do mês' : (mesPass.saldo<0 ? fmtHoras(-mesPass.saldo)+' abaixo da meta' : mesPass.saldo>0 ? '+'+fmtHoras(mesPass.saldo)+' acima da meta' : 'bateu a meta'))+'</span>' +
+    '</div>';
+
   var historico = registrosDoAluno(s.id).slice().reverse().slice(0,10).map(function(r){
     return '<div class="log-item"><span class="t">'+fmtDateTime(r.ts)+'</span><span>'+(r.tipo==='entrada'?'Chegada':'Saída')+'</span></div>';
   }).join('') || '<div class="empty-state">Nenhum registro ainda.</div>';
@@ -2187,7 +2216,13 @@ function viewAlunoPainel(){
           '<button class="btn btn-lg" data-punch-self="saida" '+(next!=='saida'?'disabled':'')+'>Marcar saída agora</button>' +
         '</div>')
       ) +
-      '<div class="stat-card" style="margin-top:18px;">' +
+      '<div class="stat-grid" style="margin-top:18px;">' +
+        '<div class="stat-card"><span class="label">Dias com registro</span><span class="value mono">'+resumoMes.totalDiasComRegistro+'/'+resumoMes.ultimoDiaMes+'</span><span class="hint">em '+resumoMes.mesLabel+'</span></div>' +
+        '<div class="stat-card"><span class="label">Total de horas</span><span class="value mono">'+fmtHoras(resumoMes.totalMin)+'</span><span class="hint">no mês atual</span></div>' +
+        devidasCard +
+        mesPassadoCard +
+      '</div>' +
+      '<div class="stat-card" style="margin-top:12px;">' +
         '<span class="label">Saldo desta semana</span>' +
         '<span class="pill '+saldoCls+'" style="font-size:14px;margin-top:6px;">'+saldoTxt+'</span>' +
         '<span class="hint">meta: '+(s.horasSemana?s.horasSemana+'h/semana':'—')+'</span>' +
