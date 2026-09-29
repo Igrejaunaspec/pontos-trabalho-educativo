@@ -316,6 +316,9 @@ window.__pontosAddRegistro = function(rec){
 window.__pontosDeleteRegistro = function(id){
   return deleteDoc(doc(db, 'registros', id));
 };
+window.__pontosUpdateRegistro = function(id, patch){
+  return updateDoc(doc(db, 'registros', id), patch);
+};
 window.__pontosAddPedido = function(rec){
   return setDoc(doc(db, 'pedidos', rec.id), rec);
 };
