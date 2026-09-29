@@ -466,6 +466,11 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
 .cal-cell.is-today{box-shadow:0 0 0 2px var(--accent);}
 .cal-cell.selected{background:var(--accent);}
 .cal-cell.selected .cal-daynum,.cal-cell.selected .cal-hours{color:var(--accent-ink);}
+/* Bateu ponto mas ficou sem par no dia (só entrada ou só saída) — fundo
+   vermelho, igual ao has-reg só que na cor de alerta, e não soma nas horas. */
+.cal-cell.cal-incompleto{background:var(--critical-soft);border-color:transparent;}
+.cal-cell.cal-incompleto .cal-daynum{color:var(--critical);}
+.cal-cell.cal-incompleto .cal-hours{color:var(--critical);font-weight:600;font-size:8.5px;}
 /* Dia combinado de trabalho (ver diasTrabalho no cadastro do aluno) — contorno
    vermelho, tenha ou não ponto batido. Comparado com o preenchido verde
    (has-reg), dá pra ver de cara falta (contornado sem verde) e presença fora
