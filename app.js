@@ -31,6 +31,7 @@ function freshUI(){
     calendarioAlunoId: null,
     calendarioBusca: '',
     calendarioDiaSel: null,
+    calendarioDiaPreview: null,
     calendarioMesOffset: 0,
     calendarioEditandoRegistroId: null
   };
@@ -1333,7 +1334,7 @@ function calendarioAluno(s){
       : deveriaVir ? (faltou ? 'Dia de trabalho combinado — sem ponto batido' : 'Dia de trabalho combinado')
       : (veioExtra ? 'Veio num dia que não é combinado' : '');
 
-    var cls = 'cal-cell' + (temRegistro && !incompleto?' has-reg':'') + (incompleto?' cal-incompleto':'') + (key===hojeKey?' is-today':'') + (UI.calendarioDiaSel===key?' selected':'') + (futuro?' cal-futuro':'') + (deveriaVir?' cal-programado':'') + (veioExtra?' cal-extra':'');
+    var cls = 'cal-cell' + (temRegistro && !incompleto?' has-reg':'') + (incompleto?' cal-incompleto':'') + (key===hojeKey?' is-today':'') + ((UI.calendarioDiaSel===key||UI.calendarioDiaPreview===key)?' selected':'') + (futuro?' cal-futuro':'') + (deveriaVir?' cal-programado':'') + (veioExtra?' cal-extra':'');
     return (
       '<button class="'+cls+'" type="button" data-cal-dia="'+key+'"'+(futuro?' disabled style="opacity:.35;cursor:default;"':'')+(titulo?' title="'+esc(titulo)+'"':'')+'>' +
         '<span class="cal-daynum">'+d.getDate()+'</span>' +
@@ -1385,7 +1386,30 @@ function calendarioAluno(s){
     mesNav +
     '<div class="cal-weekdays">'+headerDias+'</div>' +
     '<div class="cal-grid">'+padCells+cells+'</div>' +
-    '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados.</div>'
+    previewDiaHtml(s, UI.calendarioDiaPreview) +
+    '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados. Clique duas vezes para editar ou adicionar um ponto.</div>'
+  );
+}
+
+/* Preview rápido (1 clique) dos horários batidos num dia — só leitura, fica
+   logo abaixo do calendário. Pra editar/adicionar de verdade, usa o pop up
+   (2 cliques), que é o renderCalendarioDiaModal(). */
+function previewDiaHtml(s, diaKey){
+  if(!diaKey) return '';
+  var parts = diaKey.split('-');
+  var dSel = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
+  var regs = registrosDoAlunoNoDia(s.id, dSel);
+  var mins = minutosNoDia(s.id, dSel);
+  var itens = regs.slice().sort(function(a,b){ return a.ts<b.ts?-1:1; }).map(function(r){
+    return '<div class="log-item"><span class="t">'+fmtTime(r.ts)+'</span><span>'+(r.tipo==='entrada'?'Chegada':'Saída')+'</span></div>';
+  }).join('') || '<div class="empty-state">Nenhum registro nesse dia.</div>';
+  var resumo = regs.length===0 ? '' : (mins>0 ? '<span class="hint">Total: '+fmtHoras(mins)+'</span>' : '<span class="hint" style="color:var(--danger,#d33);">Sem par — não soma nas horas</span>');
+  return (
+    '<div class="stat-card" style="margin-top:10px;">' +
+      '<span class="label">'+DIAS_SEMANA[dSel.getDay()]+', '+fmtDateBR(diaKey)+'</span>' +
+      '<div class="log-list" style="margin-top:6px;">'+itens+'</div>' +
+      resumo +
+    '</div>'
   );
 }
 
@@ -1989,12 +2013,21 @@ function bindEvents(){
   $all('[data-select-calendario]').forEach(function(item){
     item.addEventListener('click', function(){
       UI.calendarioDiaSel = null;
+      UI.calendarioDiaPreview = null;
       UI.calendarioMesOffset = 0;
       toggleAccordion('calendarioAlunoId', item.getAttribute('data-select-calendario'));
       render();
     });
   });
   $all('[data-cal-dia]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var key = btn.getAttribute('data-cal-dia');
+      // 1 clique = só mostra os horários do dia logo abaixo do calendário
+      // (preview rápido, sem abrir nada); 2 cliques = abre o pop up completo
+      // pra editar/adicionar ponto (handler de dblclick abaixo).
+      UI.calendarioDiaPreview = UI.calendarioDiaPreview===key ? null : key;
+      render();
+    });
     btn.addEventListener('dblclick', function(){
       var key = btn.getAttribute('data-cal-dia');
       UI.calendarioDiaSel = key;
@@ -2008,6 +2041,7 @@ function bindEvents(){
       var novo = UI.calendarioMesOffset + delta;
       UI.calendarioMesOffset = novo > 0 ? 0 : novo; // não deixa avançar além do mês atual
       UI.calendarioDiaSel = null;
+      UI.calendarioDiaPreview = null;
       render();
     });
   });
