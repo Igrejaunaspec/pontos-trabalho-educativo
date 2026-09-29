@@ -86,6 +86,27 @@ var forgotError = document.getElementById('forgot-error');
 var forgotSuccess = document.getElementById('forgot-success');
 var showForgotLink = document.getElementById('show-forgot');
 var showLoginFromForgotLink = document.getElementById('show-login-from-forgot');
+var conviteForm = document.getElementById('convite-form');
+var conviteError = document.getElementById('convite-error');
+var showLoginFromConviteLink = document.getElementById('show-login-from-convite');
+
+/* Login por RA (aluno) — não existe e-mail de verdade por trás, então a
+   gente inventa um "e-mail fantasma" fixo a partir do RA só pra servir de
+   identificador único no Firebase Auth. O aluno nunca vê nem digita isso.
+   Sempre o mesmo RA -> sempre o mesmo e-mail fantasma (determinístico). */
+function raGhostEmail(ra){
+  var limpo = (ra || '').toString().trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return 'ra-' + limpo + '@aluno.trabalhoeducativo.app';
+}
+function pareceEmail(v){ return (v || '').indexOf('@') !== -1; }
+
+// Link de convite: ?ra=123&nome=Fulano — abre direto a tela de criar senha
+// pra esse RA (a administração já cadastrou o aluno com esse RA antes de
+// gerar o link, então o vínculo é automático, sem precisar de aprovação).
+var urlParams = new URLSearchParams(window.location.search);
+var conviteRA = (urlParams.get('ra') || '').trim();
+var conviteNome = (urlParams.get('nome') || '').trim();
+var conviteDismissed = false;
 
 function showLogin(msg){
   loginScreen.hidden = false;
@@ -93,6 +114,7 @@ function showLogin(msg){
   loginForm.hidden = false;
   signupForm.hidden = true;
   if(forgotForm) forgotForm.hidden = true;
+  if(conviteForm) conviteForm.hidden = true;
   if(msg){ loginError.textContent = msg; loginError.hidden = false; }
   else { loginError.hidden = true; }
 }
@@ -102,6 +124,7 @@ function showSignupScreen(msg){
   loginForm.hidden = true;
   signupForm.hidden = false;
   if(forgotForm) forgotForm.hidden = true;
+  if(conviteForm) conviteForm.hidden = true;
   if(msg){ signupError.textContent = msg; signupError.hidden = false; }
   else { signupError.hidden = true; }
 }
@@ -110,10 +133,25 @@ function showForgotScreen(){
   appRoot.hidden = true;
   loginForm.hidden = true;
   signupForm.hidden = true;
+  if(conviteForm) conviteForm.hidden = true;
   forgotForm.hidden = false;
   forgotError.hidden = true;
   forgotSuccess.hidden = true;
   forgotForm.reset();
+}
+function showConviteScreen(msg){
+  loginScreen.hidden = false;
+  appRoot.hidden = true;
+  loginForm.hidden = true;
+  signupForm.hidden = true;
+  if(forgotForm) forgotForm.hidden = true;
+  conviteForm.hidden = false;
+  var raInput = conviteForm.querySelector('[name="ra"]');
+  var nomeInput = conviteForm.querySelector('[name="nome"]');
+  if(raInput && !raInput.value) raInput.value = conviteRA;
+  if(nomeInput && !nomeInput.value) nomeInput.value = conviteNome;
+  if(msg){ conviteError.textContent = msg; conviteError.hidden = false; }
+  else { conviteError.hidden = true; }
 }
 function showApp(){
   loginScreen.hidden = true;
@@ -125,16 +163,23 @@ setPersistence(auth, browserLocalPersistence).catch(function(){ /* ok manter pad
 loginForm.addEventListener('submit', function(e){
   e.preventDefault();
   var fd = new FormData(loginForm);
-  var email = (fd.get('email') || '').trim();
+  var digitado = (fd.get('email') || '').trim();
+  var email = pareceEmail(digitado) ? digitado : raGhostEmail(digitado);
   var password = fd.get('password') || '';
   var btn = loginForm.querySelector('button[type="submit"]');
   btn.disabled = true;
   loginError.hidden = true;
   signInWithEmailAndPassword(auth, email, password).catch(function(err){
-    showLogin('E-mail ou senha incorretos.');
+    showLogin('RA/e-mail ou senha incorretos.');
   }).finally(function(){
     btn.disabled = false;
   });
+});
+
+if(showLoginFromConviteLink) showLoginFromConviteLink.addEventListener('click', function(e){
+  e.preventDefault();
+  conviteDismissed = true;
+  showLogin();
 });
 
 if(showSignupLink) showSignupLink.addEventListener('click', function(e){
@@ -195,29 +240,23 @@ if(forgotForm) forgotForm.addEventListener('submit', function(e){
    "pendente" (sem studentId) e o painel mostra uma tela de espera
    (ver window.__pontosStudentPending em app.js).
    ============================================================ */
-signupForm.addEventListener('submit', function(e){
-  e.preventDefault();
-  var fd = new FormData(signupForm);
-  var nome = (fd.get('nome') || '').trim();
-  var ra = (fd.get('ra') || '').trim();
-  var email = (fd.get('email') || '').trim();
-  var password = fd.get('password') || '';
-  var password2 = fd.get('password2') || '';
-  var btn = signupForm.querySelector('button[type="submit"]');
+/* Núcleo compartilhado por "Cadastre-se com seu RA" (signup-form, aluno
+   digita o próprio e-mail) e pelo link de convite (convite-form, e-mail
+   fantasma gerado do RA) — cria a conta no Auth, confere o RA em
+   "alunoRA/{ra}" e vincula automaticamente se achar (ou deixa pendente
+   pra administração completar, se o RA ainda não foi cadastrado). */
+function criarLoginEVincular(opts){
+  // opts: {nome, ra, email, password, password2, mostrarErro, aoTerminar}
+  var nome = opts.nome, ra = opts.ra, email = opts.email;
+  var password = opts.password, password2 = opts.password2;
+  var mostrarErro = opts.mostrarErro;
 
-  if(!nome){ showSignupScreen('Informe seu nome completo.'); return; }
-  if(!ra){ showSignupScreen('Informe seu RA.'); return; }
-  if(password.length < 6){ showSignupScreen('A senha precisa ter pelo menos 6 caracteres.'); return; }
-  if(password !== password2){ showSignupScreen('As senhas não coincidem.'); return; }
+  if(!nome){ mostrarErro('Informe seu nome completo.'); return; }
+  if(!ra){ mostrarErro('Informe seu RA.'); return; }
+  if(password.length < 6){ mostrarErro('A senha precisa ter pelo menos 6 caracteres.'); return; }
+  if(password !== password2){ mostrarErro('As senhas não coincidem.'); return; }
 
-  // Evita duplo envio (duplo toque no celular, tecla Enter repetida etc.):
-  // sem isso, dois envios quase simultâneos podem criar a conta com sucesso
-  // no primeiro envio e mostrar um erro confuso no segundo.
-  if(btn.disabled) return;
-  btn.disabled = true;
-  signupError.hidden = true;
   suppressAuthHandling = true; // segura o onAuthStateChanged até o vínculo terminar
-
   var createdUser = null;
 
   // Precisa criar a conta primeiro: a regra de "alunoRA" exige usuário
@@ -243,13 +282,13 @@ signupForm.addEventListener('submit', function(e){
         return setDoc(doc(db, 'alunoAuth', createdUser.uid), {studentId: studentId});
       });
   }).then(function(){
-    signupForm.reset();
     suppressAuthHandling = false;
     if(auth.currentUser){ handleUserSignedIn(auth.currentUser); }
+    if(opts.aoTerminar) opts.aoTerminar(true);
   }).catch(function(err){
     var msg = 'Não foi possível criar seu login agora. Tente novamente.';
     if(err && err.code === 'auth/email-already-in-use'){
-      msg = 'Este e-mail já está em uso. Tente entrar, ou use outro e-mail.';
+      msg = opts.emailFantasma ? 'Esse RA já tem uma senha criada. Tente entrar, ou peça um novo link pra administração.' : 'Este e-mail já está em uso. Tente entrar, ou use outro e-mail.';
     } else if(err && err.code === 'auth/weak-password'){
       msg = 'Senha muito fraca. Use pelo menos 6 caracteres.';
     } else if(err && err.code === 'auth/invalid-email'){
@@ -265,10 +304,60 @@ signupForm.addEventListener('submit', function(e){
     var cleanup = createdUser ? deleteUser(createdUser).catch(function(){ /* melhor esforço */ }) : Promise.resolve();
     return cleanup.then(function(){
       suppressAuthHandling = false;
-      showSignupScreen(msg);
+      mostrarErro(msg);
+      if(opts.aoTerminar) opts.aoTerminar(false);
     });
-  }).finally(function(){
-    btn.disabled = false;
+  });
+}
+
+signupForm.addEventListener('submit', function(e){
+  e.preventDefault();
+  var fd = new FormData(signupForm);
+  var btn = signupForm.querySelector('button[type="submit"]');
+  // Evita duplo envio (duplo toque no celular, tecla Enter repetida etc.):
+  // sem isso, dois envios quase simultâneos podem criar a conta com sucesso
+  // no primeiro envio e mostrar um erro confuso no segundo.
+  if(btn.disabled) return;
+  btn.disabled = true;
+  signupError.hidden = true;
+  criarLoginEVincular({
+    nome: (fd.get('nome') || '').trim(),
+    ra: (fd.get('ra') || '').trim(),
+    email: (fd.get('email') || '').trim(),
+    password: fd.get('password') || '',
+    password2: fd.get('password2') || '',
+    mostrarErro: showSignupScreen,
+    aoTerminar: function(ok){
+      btn.disabled = false;
+      if(ok) signupForm.reset();
+    }
+  });
+});
+
+/* Link de convite (?ra=&nome=): mesma lógica acima, só que o e-mail é
+   fantasma (gerado do RA) — o aluno só digita nome (já vem preenchido),
+   RA (travado, vem do link) e a senha que ele escolher. */
+if(conviteForm) conviteForm.addEventListener('submit', function(e){
+  e.preventDefault();
+  var fd = new FormData(conviteForm);
+  var btn = conviteForm.querySelector('button[type="submit"]');
+  if(btn.disabled) return;
+  var ra = (fd.get('ra') || '').trim();
+  if(!ra){ showConviteScreen('Link inválido — falta o RA. Peça pra administração gerar o link de novo.'); return; }
+  btn.disabled = true;
+  conviteError.hidden = true;
+  criarLoginEVincular({
+    nome: (fd.get('nome') || '').trim(),
+    ra: ra,
+    email: raGhostEmail(ra),
+    password: fd.get('password') || '',
+    password2: fd.get('password2') || '',
+    emailFantasma: true,
+    mostrarErro: showConviteScreen,
+    aoTerminar: function(ok){
+      btn.disabled = false;
+      if(ok) conviteForm.reset();
+    }
   });
 });
 
@@ -888,7 +977,11 @@ onAuthStateChanged(auth, function(user){
     stopAllListeners();
     booted = false;
     lastSentJSON = null;
-    showLogin(pendingLoginMessage);
+    if(conviteRA && !conviteDismissed && !pendingLoginMessage){
+      showConviteScreen();
+    } else {
+      showLogin(pendingLoginMessage);
+    }
     pendingLoginMessage = null;
   }
 });
