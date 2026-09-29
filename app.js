@@ -31,7 +31,8 @@ function freshUI(){
     calendarioAlunoId: null,
     calendarioBusca: '',
     calendarioDiaSel: null,
-    calendarioMesOffset: 0
+    calendarioMesOffset: 0,
+    calendarioEditandoRegistroId: null
   };
 }
 var SYNC = 'idle'; // idle | busy | off
@@ -339,6 +340,14 @@ function addRegistro(rec){
 function removeRegistro(id){
   STATE.registros = STATE.registros.filter(function(r){ return r.id !== id; });
   if(typeof window.__pontosDeleteRegistro === 'function') window.__pontosDeleteRegistro(id);
+}
+/* Corrige o horário de um registro já batido (ex.: aluno bateu 8h05 mas era
+   8h00) direto pelo Calendário, sem precisar passar por pedido de ajuste —
+   usado pela edição inline no card do dia selecionado. */
+function updateRegistro(id, patch){
+  var r = STATE.registros.filter(function(x){ return x.id===id; })[0];
+  if(r) Object.assign(r, patch);
+  if(typeof window.__pontosUpdateRegistro === 'function') window.__pontosUpdateRegistro(id, patch);
 }
 function addPedido(rec){
   STATE.pedidos.push(rec);
@@ -1337,16 +1346,34 @@ function calendarioAluno(s){
       var regsDia = registrosDoAlunoNoDia(s.id, dSel);
       var minsDia = minutosNoDia(s.id, dSel);
       var itens = regsDia.map(function(r){
+        if(UI.calendarioEditandoRegistroId === r.id){
+          return '<div class="log-item" data-cal-editando="'+r.id+'">' +
+            '<span style="flex:1;">'+(r.tipo==='entrada'?'Chegada':'Saída')+'</span>' +
+            '<input type="time" class="mono" style="width:auto;" data-cal-hora-edit="'+r.id+'" value="'+fmtTime(r.ts)+'">' +
+            '<button class="btn btn-sm btn-primary" data-cal-salvar-registro="'+r.id+'" type="button">Salvar</button>' +
+            '<button class="btn btn-sm btn-ghost" data-cal-cancelar-edicao type="button">Cancelar</button>' +
+          '</div>';
+        }
         return '<div class="log-item"><span class="t">'+fmtTime(r.ts)+'</span><span style="flex:1;">'+(r.tipo==='entrada'?'Chegada':'Saída')+' · <span style="color:var(--muted);">'+esc(r.origem||'')+'</span></span>' +
+          '<button class="btn btn-sm btn-ghost" data-cal-editar-registro="'+r.id+'" type="button" title="Corrigir o horário desse registro">Editar horário</button>' +
           '<button class="btn btn-sm btn-ghost" data-cal-del-registro="'+r.id+'" type="button" title="Excluir este registro">Excluir</button>' +
         '</div>';
       }).join('') || '<div class="empty-state">Nenhum registro nesse dia.</div>';
+      var formAddPonto =
+        '<form class="log-item" data-cal-add-ponto="'+UI.calendarioDiaSel+'" style="margin-top:4px;">' +
+          '<select name="tipo" style="width:auto;">' +
+            '<option value="entrada">Chegada</option>' +
+            '<option value="saida">Saída</option>' +
+          '</select>' +
+          '<input type="time" name="horario" class="mono" style="width:auto;" required>' +
+          '<button class="btn btn-sm btn-primary" type="submit">+ Adicionar ponto</button>' +
+        '</form>';
       diaSelInfo =
         '<div class="card" style="margin-top:14px;">' +
           '<div class="card-head"><h2>'+DIAS_SEMANA[dSel.getDay()]+', '+fmtDateBR(UI.calendarioDiaSel)+'</h2>' +
             '<span class="meta">'+(minsDia>0 ? fmtHoras(minsDia)+' no dia' : (regsDia.length ? 'sem par completo' : 'sem registro'))+'</span>' +
           '</div>' +
-          '<div class="card-body" style="display:flex;flex-direction:column;gap:6px;">'+itens+'</div>' +
+          '<div class="card-body" style="display:flex;flex-direction:column;gap:6px;">'+itens+formAddPonto+'</div>' +
         '</div>';
     }
   }
@@ -1889,6 +1916,55 @@ function bindEvents(){
           persist();
         }
       });
+      persist();
+    });
+  });
+  $all('[data-cal-editar-registro]').forEach(function(btn){
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      UI.calendarioEditandoRegistroId = btn.getAttribute('data-cal-editar-registro');
+      render();
+    });
+  });
+  $all('[data-cal-cancelar-edicao]').forEach(function(btn){
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      UI.calendarioEditandoRegistroId = null;
+      render();
+    });
+  });
+  $all('[data-cal-salvar-registro]').forEach(function(btn){
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var id = btn.getAttribute('data-cal-salvar-registro');
+      var registro = STATE.registros.filter(function(r){ return r.id===id; })[0];
+      var input = $('[data-cal-hora-edit="'+id+'"]');
+      if(!registro || !input || !input.value){ return; }
+      // Mantém o mesmo dia do registro original, só troca a hora:minuto.
+      var diaKey = todayKey(new Date(registro.ts));
+      var novoTs = new Date(diaKey+'T'+input.value+':00').toISOString();
+      var horaAntiga = fmtTime(registro.ts);
+      updateRegistro(id, {ts: novoTs});
+      logAtividade('Horário de '+(registro.tipo==='entrada'?'chegada':'saída')+' de '+fmtDateBR(diaKey)+' corrigido de '+horaAntiga+' para '+input.value+'.');
+      toast('Horário atualizado.');
+      UI.calendarioEditandoRegistroId = null;
+      persist();
+    });
+  });
+  $all('[data-cal-add-ponto]').forEach(function(form){
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      var diaKey = form.getAttribute('data-cal-add-ponto');
+      var aluno = studentById(UI.calendarioAlunoId);
+      if(!aluno) return;
+      var fd = new FormData(form);
+      var tipo = fd.get('tipo');
+      var horario = fd.get('horario');
+      if(!horario){ toast('Informe o horário.', 'err'); return; }
+      var ts = new Date(diaKey+'T'+horario+':00').toISOString();
+      addRegistro({id: uid('r'), studentId: aluno.id, tipo: tipo, ts: ts, origem: 'manual-admin'});
+      logAtividade((tipo==='entrada'?'Chegada':'Saída')+' de '+aluno.nome+' em '+fmtDateBR(diaKey)+' às '+horario+' adicionada manualmente.');
+      toast('Ponto adicionado.');
       persist();
     });
   });
