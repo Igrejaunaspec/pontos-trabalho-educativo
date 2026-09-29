@@ -683,6 +683,20 @@ function horasExportTexto(s){
   if(info.saldo > 0) return '+' + fmtHoras(info.saldo);
   return '0h';
 }
+/* Nome de aba do Excel só aceita até 31 caracteres e não pode ter
+   / \ ? * [ ]  — corta e limpa o nome do setor pra caber como aba. */
+function nomeAbaExcel(nome){
+  var limpo = (nome || '').replace(/[\/\\\?\*\[\]]/g, '-').trim();
+  return limpo.slice(0, 31) || 'Setor';
+}
+function linhaExportAluno(s){
+  return {
+    'Nome': s.nome,
+    'RA': s.ra || '',
+    'Setor': s.setorNome || setorNome(s.setor),
+    'Horas (saldo do mês)': horasExportTexto(s)
+  };
+}
 function exportarExcel(){
   if(typeof XLSX === 'undefined'){
     toast('Não foi possível carregar a biblioteca de exportação. Verifique sua conexão e tente novamente.', 'err');
@@ -691,16 +705,28 @@ function exportarExcel(){
   var wb = XLSX.utils.book_new();
 
   var alunosOrdenados = STATE.students.slice().sort(function(a,b){ return a.nome.localeCompare(b.nome,'pt-BR'); });
-  var alunosData = alunosOrdenados.map(function(s){
-    return {
-      'Nome': s.nome,
-      'RA': s.ra || '',
-      'Horas (saldo do mês)': horasExportTexto(s)
-    };
-  });
+
+  // Aba "Todos" com todo mundo junto (visão geral)...
+  var alunosData = alunosOrdenados.map(linhaExportAluno);
   var wsAlunos = XLSX.utils.json_to_sheet(alunosData);
-  wsAlunos['!cols'] = [{wch:28},{wch:12},{wch:22}];
-  XLSX.utils.book_append_sheet(wb, wsAlunos, 'Alunos');
+  wsAlunos['!cols'] = [{wch:28},{wch:12},{wch:18},{wch:22}];
+  XLSX.utils.book_append_sheet(wb, wsAlunos, 'Todos');
+
+  // ...e uma aba separada por setor (Comunicação, Conservação, Sonoplastia
+  // etc. — os setores que você tiver configurado), cada uma só com os
+  // alunos daquele setor, na mesma ordem que aparecem em Configurações.
+  var usados = {}; // evita nome de aba repetido se dois setores derem o mesmo nome cortado
+  STATE.setores.forEach(function(setor){
+    var doSetor = alunosOrdenados.filter(function(s){ return s.setor === setor.id; });
+    if(!doSetor.length) return;
+    var wsSetor = XLSX.utils.json_to_sheet(doSetor.map(linhaExportAluno));
+    wsSetor['!cols'] = [{wch:28},{wch:12},{wch:18},{wch:22}];
+    var nomeAba = nomeAbaExcel(setor.nome);
+    var final = nomeAba, n = 2;
+    while(usados[final]){ final = nomeAbaExcel(setor.nome).slice(0,28) + ' ' + n; n++; }
+    usados[final] = true;
+    XLSX.utils.book_append_sheet(wb, wsSetor, final);
+  });
 
   var filename = 'trabalho-educativo-' + todayKey() + '.xlsx';
   try{
