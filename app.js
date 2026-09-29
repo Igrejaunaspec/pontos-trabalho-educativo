@@ -82,6 +82,36 @@ function syncAccordionAnimations(){
 var DIAS_SEMANA = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
 var MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 var DIAS_SEMANA_CURTO_SEG = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom']; // segunda-feira primeiro (calendário de 30 dias)
+// Código de dia da semana por índice de Date.getDay() (0=domingo..6=sábado) — usado
+// pra bater o dia real do calendário contra os "dias de trabalho" combinados do aluno.
+var DIA_SEMANA_CODE = ['dom','seg','ter','qua','qui','sex','sab'];
+// Opções do seletor de "dias de trabalho" (caixinhas no cadastro do aluno), na ordem
+// de exibição Seg..Dom.
+var DIAS_TRABALHO_OPTS = [
+  {code:'seg', label:'Seg'}, {code:'ter', label:'Ter'}, {code:'qua', label:'Qua'},
+  {code:'qui', label:'Qui'}, {code:'sex', label:'Sex'}, {code:'sab', label:'Sáb'}, {code:'dom', label:'Dom'}
+];
+/* Lê s.diasTrabalho (string "seg,ter,qua,qui,sex" salva pelas caixinhas do cadastro)
+   como array de códigos válidos. Cadastros antigos, salvos como texto livre (ex.:
+   "Seg a sex.") antes dessa mudança, não batem com nenhum código — ficam de fora do
+   array (não quebra nada, só não participa do destaque de falta/dia extra no
+   Calendário até alguém reabrir o cadastro e marcar as caixinhas certas). */
+function diasTrabalhoArray(s){
+  var codigos = DIAS_TRABALHO_OPTS.map(function(o){return o.code;});
+  return String((s && s.diasTrabalho) || '').split(',').map(function(x){return x.trim().toLowerCase();})
+    .filter(function(x){ return codigos.indexOf(x) !== -1; });
+}
+/* Texto pra exibir nas telas de listagem/perfil — converte os códigos salvos de volta
+   pros rótulos (Seg, Ter…). Se o cadastro ainda tiver o texto livre antigo (não bate
+   com nenhum código), mostra esse texto como está, pra não perder a informação. */
+function diasTrabalhoLabel(s){
+  var arr = diasTrabalhoArray(s);
+  if(arr.length){
+    var map = {}; DIAS_TRABALHO_OPTS.forEach(function(o){ map[o.code]=o.label; });
+    return arr.map(function(c){ return map[c]; }).join(', ');
+  }
+  return (s && s.diasTrabalho) || '';
+}
 
 /* ============================================================
    Small utilities
@@ -844,7 +874,7 @@ function viewAlunos(){
       '<td data-label="Setor">'+esc(setorNome(s.setor))+'</td>' +
       '<td data-label="Nível"><span class="pill pill-muted">'+nivelLabel(s.nivel)+'</span></td>' +
       '<td class="mono" data-label="Carga">'+horasSemanaLabel(s)+'</td>' +
-      '<td data-label="Dias de trabalho">'+esc(s.diasTrabalho||'—')+'</td>' +
+      '<td data-label="Dias de trabalho">'+esc(diasTrabalhoLabel(s)||'—')+'</td>' +
       '<td data-label="Hoje">'+statusHojePill(s.id)+'</td>' +
       '<td data-label="Saldo da semana">'+saldoPill(s)+'</td>' +
     '</tr>';
@@ -863,7 +893,7 @@ function viewAlunos(){
               '<div class="kv"><span class="k">Setor</span><span class="v">'+esc(setorNome(s.setor))+'</span></div>' +
               '<div class="kv"><span class="k">Nível</span><span class="v">'+nivelLabel(s.nivel)+'</span></div>' +
               '<div class="kv"><span class="k">Carga</span><span class="v mono">'+horasSemanaLabel(s)+'</span></div>' +
-              '<div class="kv"><span class="k">Dias de trabalho</span><span class="v">'+esc(s.diasTrabalho||'—')+'</span></div>' +
+              '<div class="kv"><span class="k">Dias de trabalho</span><span class="v">'+esc(diasTrabalhoLabel(s)||'—')+'</span></div>' +
               '<div class="kv"><span class="k">Hoje</span><span class="v">'+statusHojePill(s.id)+'</span></div>' +
               '<div class="kv"><span class="k">Saldo da semana</span><span class="v">'+saldoPill(s)+'</span></div>' +
             '</div>' +
@@ -1242,6 +1272,13 @@ function calendarioAluno(s){
     dias.push(new Date(mesRef.getFullYear(), mesRef.getMonth(), dnum));
   }
 
+  // Dias de trabalho combinados do aluno (caixinhas do cadastro). Só entra no
+  // destaque de falta/dia-extra quando o cadastro tem pelo menos um dia marcado
+  // no formato novo — cadastro sem isso preenchido (ou ainda no texto livre
+  // antigo) não ganha destaque nenhum, pra não acusar falta à toa.
+  var diasCombinados = diasTrabalhoArray(s);
+  var temProgramacao = diasCombinados.length > 0;
+
   var totalDiasComRegistro = 0, totalMin = 0;
   var cells = dias.map(function(d){
     var futuro = d > hoje;
@@ -1250,9 +1287,15 @@ function calendarioAluno(s){
     if(temRegistro) totalDiasComRegistro++;
     totalMin += mins;
     var key = todayKey(d);
-    var cls = 'cal-cell' + (temRegistro?' has-reg':'') + (key===hojeKey?' is-today':'') + (UI.calendarioDiaSel===key?' selected':'') + (futuro?' cal-futuro':'');
+
+    var deveriaVir = temProgramacao && diasCombinados.indexOf(DIA_SEMANA_CODE[d.getDay()]) !== -1;
+    var alertaFalta = !futuro && temProgramacao && deveriaVir && !temRegistro;
+    var alertaExtra = !futuro && temProgramacao && !deveriaVir && temRegistro;
+    var alertaTitulo = alertaFalta ? 'Dia de trabalho combinado, mas sem ponto batido' : (alertaExtra ? 'Veio num dia que não é combinado' : '');
+
+    var cls = 'cal-cell' + (temRegistro?' has-reg':'') + (key===hojeKey?' is-today':'') + (UI.calendarioDiaSel===key?' selected':'') + (futuro?' cal-futuro':'') + ((alertaFalta||alertaExtra)?' cal-alerta':'');
     return (
-      '<button class="'+cls+'" type="button" data-cal-dia="'+key+'"'+(futuro?' disabled style="opacity:.35;cursor:default;"':'')+'>' +
+      '<button class="'+cls+'" type="button" data-cal-dia="'+key+'"'+(futuro?' disabled style="opacity:.35;cursor:default;"':'')+(alertaTitulo?' title="'+esc(alertaTitulo)+'"':'')+'>' +
         '<span class="cal-daynum">'+d.getDate()+'</span>' +
         (mins>0 ? '<span class="cal-hours">'+fmtHoras(mins)+'</span>' : (temRegistro ? '<span class="cal-hours">—</span>' : '')) +
       '</button>'
@@ -1323,7 +1366,7 @@ function calendarioAluno(s){
     mesNav +
     '<div class="cal-weekdays">'+headerDias+'</div>' +
     '<div class="cal-grid">'+padCells+cells+'</div>' +
-    '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados.</div>' +
+    '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados.'+(temProgramacao ? ' Dias contornados em <span style="color:var(--critical);font-weight:600;">vermelho</span> são falta num dia combinado ou presença num dia que não era combinado.' : '')+'</div>' +
     diaSelInfo
   );
 }
@@ -1509,7 +1552,7 @@ function drawerView(s){
       kv('RA', s.ra || '—') + kv('Telefone', s.telefone || '—') +
       kv('Aniversário', s.aniversario ? fmtDateBR(s.aniversario) : '—') + kv('Curso', s.curso || '—') +
       kv('Bolsa', s.bolsa || '—') + kv('Carga horária', horasSemanaLabel(s)) +
-      kv('Dias de trabalho', s.diasTrabalho || '—', true) +
+      kv('Dias de trabalho', diasTrabalhoLabel(s) || '—', true) +
     '</div>' +
 
     '<div class="stat-grid">' +
@@ -1547,9 +1590,16 @@ function drawerEditForm(s, creating, aprovando){
         '<label>Telefone<input type="text" name="telefone" value="'+esc(s.telefone)+'"></label>' +
         '<label>Aniversário<input type="date" name="aniversario" value="'+esc(s.aniversario)+'"></label>' +
       '</div>' +
-      '<div class="field-row">' +
-        '<label>Curso<input type="text" name="curso" value="'+esc(s.curso)+'"></label>' +
-        '<label>Dias de trabalho<input type="text" name="diasTrabalho" value="'+esc(s.diasTrabalho)+'" placeholder="ex.: Seg. a sex."></label>' +
+      '<label>Curso<input type="text" name="curso" value="'+esc(s.curso)+'"></label>' +
+      '<div class="field-block">' +
+        '<span class="field-block-label">Dias de trabalho</span>' +
+        '<div class="dias-picker">'+(function(){
+          var marcados = diasTrabalhoArray(s);
+          return DIAS_TRABALHO_OPTS.map(function(opt){
+            var checked = marcados.indexOf(opt.code) !== -1;
+            return '<label class="dia-check"><input type="checkbox" name="diasTrabalho" value="'+opt.code+'"'+(checked?' checked':'')+'> '+opt.label+'</label>';
+          }).join('');
+        })()+'</div>' +
       '</div>' +
       '<label>Observações<textarea name="observacao">'+esc(s.observacao)+'</textarea></label>' +
       '<div class="toolbar"><button class="btn btn-primary" type="submit">'+(aprovando?'Aprovar e cadastrar':(creating?'Cadastrar aluno':'Salvar alterações'))+'</button>' +
@@ -1568,7 +1618,7 @@ function saveProfileForm(form, s, creating){
     telefone: (fd.get('telefone')||'').trim(),
     aniversario: fd.get('aniversario') || '',
     curso: (fd.get('curso')||'').trim(),
-    diasTrabalho: (fd.get('diasTrabalho')||'').trim(),
+    diasTrabalho: fd.getAll('diasTrabalho').join(','), // caixinhas marcadas (Seg..Dom), ex.: "seg,ter,qua,qui,sex"
     observacao: (fd.get('observacao')||'').trim()
   };
   if(!patch.nome){ toast('Informe o nome do aluno.', 'err'); return; }
