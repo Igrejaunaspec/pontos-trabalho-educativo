@@ -1297,6 +1297,7 @@ function calendarioAluno(s){
       '<span class="avatar" style="width:44px;height:44px;font-size:15px;">'+initials(s.nome)+'</span>' +
       '<span class="who">'+esc(s.nome)+'</span>' +
       '<span class="state">'+esc(s.setorNome || setorNome(s.setor))+' · '+nivelLabel(s.nivel)+'</span>' +
+      '<span class="state">Bolsa '+esc(s.bolsa||'—')+' · '+horasSemanaLabel(s)+'</span>' +
     '</div>' +
     '<div class="stat-grid" style="margin-bottom:14px;">' +
       '<div class="stat-card"><span class="label">Dias com registro</span><span class="value mono">'+totalDiasComRegistro+'/30</span><span class="hint">nos últimos 30 dias</span></div>' +
