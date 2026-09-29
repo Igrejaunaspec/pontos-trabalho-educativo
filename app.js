@@ -222,25 +222,25 @@ function proximoTipo(id){
 }
 function minutosTrabalhados(id, sinceISO, untilISO){
   var list = registrosDoAluno(id);
+  if(!list.length) return 0;
+  // Soma dia a dia (reaproveitando minutosNoDia, que já casa entrada/saída
+  // só dentro do MESMO dia) em vez de uma pilha única passando por toda a
+  // lista de registros. Isso é de propósito: uma pilha "global" casa a
+  // entrada de um dia com a saída de outro dia quando falta uma saída no
+  // meio — por exemplo, esqueceu de bater a saída num dia e só bateu de
+  // novo dias depois — e aí "soma" um turno fantasma de vários dias
+  // seguidos como se fosse uma hora só trabalhada. Somando por dia, um par
+  // incompleto (só entrada, sem saída naquele dia, ou vice-versa) não soma
+  // nada e não "vaza" pro dia seguinte.
+  var inicioRef = sinceISO ? new Date(sinceISO) : new Date(list[0].ts);
+  var inicio = new Date(inicioRef.getFullYear(), inicioRef.getMonth(), inicioRef.getDate());
+  var fimRef = untilISO ? new Date(untilISO) : new Date(Date.now() + 86400000);
+  var fim = new Date(fimRef.getFullYear(), fimRef.getMonth(), fimRef.getDate());
   var total = 0;
-  // Pilha (não uma única variável) — necessário porque um aluno pode ter
-  // mais de um turno no mesmo dia (ex.: "Marcar turno cumprido (+4h)" duas
-  // vezes, manhã e noite). Como o registro de turno grava a saída bem
-  // depois da chegada, a entrada do 2º turno acaba, em ordem cronológica
-  // bruta, ANTES da saída do 1º — uma única variável "aberta" perdia essa
-  // entrada e descartava a soma. A pilha soma corretamente em qualquer
-  // ordem de entradas/saídas, desde que o total de entradas e saídas bata.
-  var pilha = [];
-  for(var i=0;i<list.length;i++){
-    var r = list[i];
-    if(sinceISO && r.ts < sinceISO) continue;
-    if(untilISO && r.ts >= untilISO) continue;
-    if(r.tipo === 'entrada'){
-      pilha.push(r.ts);
-    } else if(r.tipo === 'saida' && pilha.length){
-      var abertura = pilha.pop();
-      total += (new Date(r.ts) - new Date(abertura)) / 60000;
-    }
+  var cursor = new Date(inicio);
+  while(cursor < fim){
+    total += minutosNoDia(id, cursor);
+    cursor.setDate(cursor.getDate()+1);
   }
   return total;
 }
@@ -290,8 +290,9 @@ function registrosDoAlunoNoDia(id, d){
   var fimISO = localMidnightISO(new Date(d.getFullYear(), d.getMonth(), d.getDate()+1));
   return registrosDoAluno(id).filter(function(r){ return r.ts >= iniISO && r.ts < fimISO; });
 }
-/* Minutos trabalhados num único dia (mesma lógica de pilha de minutosTrabalhados,
-   mas restrita àquele dia — usada no calendário de 30 dias). */
+/* Minutos trabalhados num único dia — casa entrada/saída só dentro desse dia
+   (pilha reiniciada a cada chamada). Base de minutosTrabalhados() acima
+   (que soma isso dia a dia) e também usada direto no calendário do aluno. */
 function minutosNoDia(id, d){
   var list = registrosDoAlunoNoDia(id, d);
   var total = 0, pilha = [];
@@ -1284,25 +1285,33 @@ function calendarioAluno(s){
     var futuro = d > hoje;
     var mins = futuro ? 0 : minutosNoDia(s.id, d);
     var temRegistro = !futuro && registrosDoAlunoNoDia(s.id, d).length > 0;
+    // Bateu ponto naquele dia, mas ficou sem par (entrada sem saída, ou
+    // saída sem entrada, no mesmo dia) — minutosNoDia dá 0 nesse caso.
+    // Fica vermelho e NÃO soma nas horas, em vez de contar como dia normal —
+    // isso evita o problema de uma entrada solta "vazar" e ser casada com a
+    // saída de um dia bem depois, inflando as horas do mês inteiro.
+    var incompleto = temRegistro && mins<=0;
     if(temRegistro) totalDiasComRegistro++;
     totalMin += mins;
     var key = todayKey(d);
 
     // Dia combinado de trabalho = fica com contorno vermelho, tenha ou não
     // registro. Combinado com o preenchido verde (has-reg, quando bateu
-    // ponto), dá pra ler os dois casos direto no calendário: contornado sem
-    // verde = faltou num dia combinado; verde sem contorno = veio num dia
-    // que não era combinado.
+    // ponto certinho), dá pra ler os casos direto no calendário: contornado
+    // sem verde = faltou num dia combinado; verde sem contorno = veio num
+    // dia que não era combinado.
     var deveriaVir = temProgramacao && diasCombinados.indexOf(DIA_SEMANA_CODE[d.getDay()]) !== -1;
     var faltou = !futuro && deveriaVir && !temRegistro;
     var veioExtra = !futuro && temProgramacao && !deveriaVir && temRegistro;
-    var titulo = deveriaVir ? (faltou ? 'Dia de trabalho combinado — sem ponto batido' : 'Dia de trabalho combinado') : (veioExtra ? 'Veio num dia que não é combinado' : '');
+    var titulo = incompleto ? 'Bateu ponto, mas ficou sem par nesse dia (falta entrada ou saída) — não soma nas horas'
+      : deveriaVir ? (faltou ? 'Dia de trabalho combinado — sem ponto batido' : 'Dia de trabalho combinado')
+      : (veioExtra ? 'Veio num dia que não é combinado' : '');
 
-    var cls = 'cal-cell' + (temRegistro?' has-reg':'') + (key===hojeKey?' is-today':'') + (UI.calendarioDiaSel===key?' selected':'') + (futuro?' cal-futuro':'') + (deveriaVir?' cal-programado':'') + (veioExtra?' cal-extra':'');
+    var cls = 'cal-cell' + (temRegistro && !incompleto?' has-reg':'') + (incompleto?' cal-incompleto':'') + (key===hojeKey?' is-today':'') + (UI.calendarioDiaSel===key?' selected':'') + (futuro?' cal-futuro':'') + (deveriaVir?' cal-programado':'') + (veioExtra?' cal-extra':'');
     return (
       '<button class="'+cls+'" type="button" data-cal-dia="'+key+'"'+(futuro?' disabled style="opacity:.35;cursor:default;"':'')+(titulo?' title="'+esc(titulo)+'"':'')+'>' +
         '<span class="cal-daynum">'+d.getDate()+'</span>' +
-        (mins>0 ? '<span class="cal-hours">'+fmtHoras(mins)+'</span>' : (temRegistro ? '<span class="cal-hours">—</span>' : '')) +
+        (mins>0 ? '<span class="cal-hours">'+fmtHoras(mins)+'</span>' : (incompleto ? '<span class="cal-hours">sem par</span>' : '')) +
       '</button>'
     );
   }).join('');
