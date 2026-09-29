@@ -14,7 +14,7 @@
 <form id="login-form" class="login-card">
 <div class="login-brand">Trabalho Educativo</div>
 <div class="login-sub">Pontos &amp; presença de bolsistas</div>
-<label>E-mail<input type="email" name="email" required autocomplete="username"></label>
+<label>RA ou e-mail<input type="text" name="email" required autocomplete="username"></label>
 <label>Senha<input type="password" name="password" required autocomplete="current-password"></label>
 <div class="login-error" id="login-error" hidden></div>
 <button class="btn btn-primary" type="submit">Entrar</button>
@@ -25,7 +25,7 @@
 <form id="forgot-form" class="login-card" hidden>
 <div class="login-brand">Trabalho Educativo</div>
 <div class="login-sub">Redefinir senha</div>
-<p class="login-switch" style="margin:0 0 -6px;">Informe o e-mail do seu login. Vamos enviar um link para você criar uma senha nova.</p>
+<p class="login-switch" style="margin:0 0 -6px;">Informe o e-mail do seu login. Vamos enviar um link para você criar uma senha nova. (Quem entra só com RA não recebe esse e-mail — peça pra administração gerar um novo link de acesso.)</p>
 <label>E-mail<input type="email" name="email" required autocomplete="username"></label>
 <div class="login-error" id="forgot-error" hidden></div>
 <div class="login-success" id="forgot-success" hidden></div>
@@ -45,13 +45,26 @@
 <button class="btn btn-primary" type="submit">Criar login</button>
 <div class="login-switch">Já tem login? <a href="#" id="show-login">Entrar</a></div>
 </form>
+
+<form id="convite-form" class="login-card" hidden>
+<div class="login-brand">Trabalho Educativo</div>
+<div class="login-sub">Criar seu acesso</div>
+<p class="login-switch" style="margin:0 0 -6px;">Você recebeu um link da administração para criar sua senha de acesso.</p>
+<label>Nome completo<input type="text" name="nome" required autocomplete="name"></label>
+<label>RA (matrícula)<input type="text" name="ra" required autocomplete="off" inputmode="numeric" readonly></label>
+<label>Senha<input type="password" name="password" required minlength="6" autocomplete="new-password"></label>
+<label>Confirmar senha<input type="password" name="password2" required minlength="6" autocomplete="new-password"></label>
+<div class="login-error" id="convite-error" hidden></div>
+<button class="btn btn-primary" type="submit">Criar meu acesso</button>
+<div class="login-switch">Já tem login? <a href="#" id="show-login-from-convite">Entrar</a></div>
+</form>
 </div>
 
 <div id="app" hidden></div>
 <div class="toast-stack" id="toast-stack"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="app.js?v=20260929m"></script>
-<script type="module" src="firebase-init.js?v=20260929b"></script>
+<script src="app.js?v=20260929n"></script>
+<script type="module" src="firebase-init.js?v=20260929c"></script>
 </body>
 </html>
