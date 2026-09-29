@@ -534,6 +534,8 @@ function render(){
   updateSyncPill();
   bindEvents();
   if(UI.drawerId || UI.drawerCreate) renderDrawer();
+  if(UI.calendarioDiaSel) renderCalendarioDiaModal();
+  else { var strayDiaModal = $('.overlay.overlay-center'); if(strayDiaModal) strayDiaModal.remove(); }
   syncAccordionAnimations();
 }
 
@@ -1339,45 +1341,6 @@ function calendarioAluno(s){
       '<button class="btn btn-sm btn-ghost" type="button" data-cal-mes="1" aria-label="Próximo mês" title="Próximo mês"'+(offset>=0?' disabled':'')+'>›</button>' +
     '</div>';
 
-  var diaSelInfo = '';
-  if(UI.calendarioDiaSel){
-    var dSel = dias.filter(function(d){ return todayKey(d)===UI.calendarioDiaSel; })[0];
-    if(dSel){
-      var regsDia = registrosDoAlunoNoDia(s.id, dSel);
-      var minsDia = minutosNoDia(s.id, dSel);
-      var itens = regsDia.map(function(r){
-        if(UI.calendarioEditandoRegistroId === r.id){
-          return '<div class="log-item" data-cal-editando="'+r.id+'">' +
-            '<span style="flex:1;">'+(r.tipo==='entrada'?'Chegada':'Saída')+'</span>' +
-            '<input type="time" class="mono" style="width:auto;" data-cal-hora-edit="'+r.id+'" value="'+fmtTime(r.ts)+'">' +
-            '<button class="btn btn-sm btn-primary" data-cal-salvar-registro="'+r.id+'" type="button">Salvar</button>' +
-            '<button class="btn btn-sm btn-ghost" data-cal-cancelar-edicao type="button">Cancelar</button>' +
-          '</div>';
-        }
-        return '<div class="log-item"><span class="t">'+fmtTime(r.ts)+'</span><span style="flex:1;">'+(r.tipo==='entrada'?'Chegada':'Saída')+' · <span style="color:var(--muted);">'+esc(r.origem||'')+'</span></span>' +
-          '<button class="btn btn-sm btn-ghost" data-cal-editar-registro="'+r.id+'" type="button" title="Corrigir o horário desse registro">Editar horário</button>' +
-          '<button class="btn btn-sm btn-ghost" data-cal-del-registro="'+r.id+'" type="button" title="Excluir este registro">Excluir</button>' +
-        '</div>';
-      }).join('') || '<div class="empty-state">Nenhum registro nesse dia.</div>';
-      var formAddPonto =
-        '<form class="log-item" data-cal-add-ponto="'+UI.calendarioDiaSel+'" style="margin-top:4px;">' +
-          '<select name="tipo" style="width:auto;">' +
-            '<option value="entrada">Chegada</option>' +
-            '<option value="saida">Saída</option>' +
-          '</select>' +
-          '<input type="time" name="horario" class="mono" style="width:auto;" required>' +
-          '<button class="btn btn-sm btn-primary" type="submit">+ Adicionar ponto</button>' +
-        '</form>';
-      diaSelInfo =
-        '<div class="card" style="margin-top:14px;">' +
-          '<div class="card-head"><h2>'+DIAS_SEMANA[dSel.getDay()]+', '+fmtDateBR(UI.calendarioDiaSel)+'</h2>' +
-            '<span class="meta">'+(minsDia>0 ? fmtHoras(minsDia)+' no dia' : (regsDia.length ? 'sem par completo' : 'sem registro'))+'</span>' +
-          '</div>' +
-          '<div class="card-body" style="display:flex;flex-direction:column;gap:6px;">'+itens+formAddPonto+'</div>' +
-        '</div>';
-    }
-  }
-
   var devidas = horasDevidasMesAtual(s);
   var devidasCard = devidas.saldo===null ?
     '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono">—</span><span class="hint">carga horária não definida</span></div>' :
@@ -1407,9 +1370,136 @@ function calendarioAluno(s){
     mesNav +
     '<div class="cal-weekdays">'+headerDias+'</div>' +
     '<div class="cal-grid">'+padCells+cells+'</div>' +
-    '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados.</div>' +
-    diaSelInfo
+    '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados.</div>'
   );
+}
+
+/* Popup com o detalhe do dia selecionado no Calendário — registros do dia,
+   edição de horário e adicionar ponto que faltou. Fica num overlay próprio
+   (mesmo padrão do drawer de editar aluno), então re-render() completo
+   (chamado pelos botões dentro dele) reconstrói a tela por trás E chama essa
+   função de novo no final, então o popup sempre reflete o dado mais novo. */
+function renderCalendarioDiaModal(){
+  var existing = $('.overlay.overlay-center');
+  if(existing) existing.remove();
+  var s = studentById(UI.calendarioAlunoId);
+  if(!s || !UI.calendarioDiaSel){ return; }
+  var parts = UI.calendarioDiaSel.split('-');
+  var dSel = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
+
+  var regsDia = registrosDoAlunoNoDia(s.id, dSel);
+  var minsDia = minutosNoDia(s.id, dSel);
+  var itens = regsDia.map(function(r){
+    if(UI.calendarioEditandoRegistroId === r.id){
+      return '<div class="log-item" data-cal-editando="'+r.id+'">' +
+        '<span style="flex:1;">'+(r.tipo==='entrada'?'Chegada':'Saída')+'</span>' +
+        '<input type="time" class="mono" style="width:auto;" data-cal-hora-edit="'+r.id+'" value="'+fmtTime(r.ts)+'">' +
+        '<button class="btn btn-sm btn-primary" data-cal-salvar-registro="'+r.id+'" type="button">Salvar</button>' +
+        '<button class="btn btn-sm btn-ghost" data-cal-cancelar-edicao type="button">Cancelar</button>' +
+      '</div>';
+    }
+    return '<div class="log-item"><span class="t">'+fmtTime(r.ts)+'</span><span style="flex:1;">'+(r.tipo==='entrada'?'Chegada':'Saída')+' · <span style="color:var(--muted);">'+esc(r.origem||'')+'</span></span>' +
+      '<button class="btn btn-sm btn-ghost" data-cal-editar-registro="'+r.id+'" type="button" title="Corrigir o horário desse registro">Editar horário</button>' +
+      '<button class="btn btn-sm btn-ghost" data-cal-del-registro="'+r.id+'" type="button" title="Excluir este registro">Excluir</button>' +
+    '</div>';
+  }).join('') || '<div class="empty-state">Nenhum registro nesse dia.</div>';
+  var formAddPonto =
+    '<form class="log-item" data-cal-add-ponto="'+UI.calendarioDiaSel+'" style="margin-top:4px;">' +
+      '<select name="tipo" style="width:auto;">' +
+        '<option value="entrada">Chegada</option>' +
+        '<option value="saida">Saída</option>' +
+      '</select>' +
+      '<input type="time" name="horario" class="mono" style="width:auto;" required>' +
+      '<button class="btn btn-sm btn-primary" type="submit">+ Adicionar ponto</button>' +
+    '</form>';
+
+  var overlay = document.createElement('div');
+  overlay.className = 'overlay overlay-center';
+  overlay.innerHTML =
+    '<div class="modal-card">' +
+      '<div class="drawer-head">' +
+        '<div><div class="name" style="font-size:17px;">'+DIAS_SEMANA[dSel.getDay()]+', '+fmtDateBR(UI.calendarioDiaSel)+'</div>' +
+          '<div class="setor">'+esc(s.nome)+' · '+(minsDia>0 ? fmtHoras(minsDia)+' no dia' : (regsDia.length ? 'sem par completo' : 'sem registro'))+'</div></div>' +
+        '<button class="close-btn" aria-label="Fechar">✕</button>' +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:6px;">'+itens+formAddPonto+'</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('mousedown', function(e){ if(e.target===overlay) closeCalendarioDiaModal(); });
+  var closeBtn = $('.close-btn', overlay);
+  if(closeBtn) closeBtn.addEventListener('click', closeCalendarioDiaModal);
+
+  $all('[data-cal-del-registro]', overlay).forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var id = btn.getAttribute('data-cal-del-registro');
+      var registro = STATE.registros.filter(function(r){ return r.id===id; })[0];
+      if(!registro) return;
+      removeRegistro(id);
+      logAtividade((registro.tipo==='entrada'?'Chegada':'Saída')+' de '+fmtDateTime(registro.ts)+' excluída manualmente.');
+      toast('Registro excluído.', null, {
+        actionLabel: 'Desfazer',
+        onAction: function(){
+          addRegistro(registro);
+          logAtividade('Exclusão de registro desfeita.');
+          toast('Exclusão desfeita.');
+          persist();
+        }
+      });
+      persist();
+    });
+  });
+  $all('[data-cal-editar-registro]', overlay).forEach(function(btn){
+    btn.addEventListener('click', function(){
+      UI.calendarioEditandoRegistroId = btn.getAttribute('data-cal-editar-registro');
+      renderCalendarioDiaModal();
+    });
+  });
+  $all('[data-cal-cancelar-edicao]', overlay).forEach(function(btn){
+    btn.addEventListener('click', function(){
+      UI.calendarioEditandoRegistroId = null;
+      renderCalendarioDiaModal();
+    });
+  });
+  $all('[data-cal-salvar-registro]', overlay).forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var id = btn.getAttribute('data-cal-salvar-registro');
+      var registro = STATE.registros.filter(function(r){ return r.id===id; })[0];
+      var input = $('[data-cal-hora-edit="'+id+'"]', overlay);
+      if(!registro || !input || !input.value){ return; }
+      // Mantém o mesmo dia do registro original, só troca a hora:minuto.
+      var diaKey = todayKey(new Date(registro.ts));
+      var novoTs = new Date(diaKey+'T'+input.value+':00').toISOString();
+      var horaAntiga = fmtTime(registro.ts);
+      updateRegistro(id, {ts: novoTs});
+      logAtividade('Horário de '+(registro.tipo==='entrada'?'chegada':'saída')+' de '+fmtDateBR(diaKey)+' corrigido de '+horaAntiga+' para '+input.value+'.');
+      toast('Horário atualizado.');
+      UI.calendarioEditandoRegistroId = null;
+      persist();
+    });
+  });
+  $all('[data-cal-add-ponto]', overlay).forEach(function(form){
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      var diaKey = form.getAttribute('data-cal-add-ponto');
+      var aluno = studentById(UI.calendarioAlunoId);
+      if(!aluno) return;
+      var fd = new FormData(form);
+      var tipo = fd.get('tipo');
+      var horario = fd.get('horario');
+      if(!horario){ toast('Informe o horário.', 'err'); return; }
+      var ts = new Date(diaKey+'T'+horario+':00').toISOString();
+      addRegistro({id: uid('r'), studentId: aluno.id, tipo: tipo, ts: ts, origem: 'manual-admin'});
+      logAtividade((tipo==='entrada'?'Chegada':'Saída')+' de '+aluno.nome+' em '+fmtDateBR(diaKey)+' às '+horario+' adicionada manualmente.');
+      toast('Ponto adicionado.');
+      persist();
+    });
+  });
+}
+function closeCalendarioDiaModal(){
+  UI.calendarioDiaSel = null;
+  UI.calendarioEditandoRegistroId = null;
+  var overlay = $('.overlay.overlay-center'); if(overlay) overlay.remove();
 }
 
 function viewPedidos(){
@@ -1886,7 +1976,8 @@ function bindEvents(){
   $all('[data-cal-dia]').forEach(function(btn){
     btn.addEventListener('click', function(){
       var key = btn.getAttribute('data-cal-dia');
-      UI.calendarioDiaSel = UI.calendarioDiaSel===key ? null : key;
+      UI.calendarioDiaSel = key;
+      UI.calendarioEditandoRegistroId = null;
       render();
     });
   });
@@ -1897,75 +1988,6 @@ function bindEvents(){
       UI.calendarioMesOffset = novo > 0 ? 0 : novo; // não deixa avançar além do mês atual
       UI.calendarioDiaSel = null;
       render();
-    });
-  });
-  $all('[data-cal-del-registro]').forEach(function(btn){
-    btn.addEventListener('click', function(e){
-      e.stopPropagation();
-      var id = btn.getAttribute('data-cal-del-registro');
-      var registro = STATE.registros.filter(function(r){ return r.id===id; })[0];
-      if(!registro) return;
-      removeRegistro(id);
-      logAtividade((registro.tipo==='entrada'?'Chegada':'Saída')+' de '+fmtDateTime(registro.ts)+' excluída manualmente.');
-      toast('Registro excluído.', null, {
-        actionLabel: 'Desfazer',
-        onAction: function(){
-          addRegistro(registro);
-          logAtividade('Exclusão de registro desfeita.');
-          toast('Exclusão desfeita.');
-          persist();
-        }
-      });
-      persist();
-    });
-  });
-  $all('[data-cal-editar-registro]').forEach(function(btn){
-    btn.addEventListener('click', function(e){
-      e.stopPropagation();
-      UI.calendarioEditandoRegistroId = btn.getAttribute('data-cal-editar-registro');
-      render();
-    });
-  });
-  $all('[data-cal-cancelar-edicao]').forEach(function(btn){
-    btn.addEventListener('click', function(e){
-      e.stopPropagation();
-      UI.calendarioEditandoRegistroId = null;
-      render();
-    });
-  });
-  $all('[data-cal-salvar-registro]').forEach(function(btn){
-    btn.addEventListener('click', function(e){
-      e.stopPropagation();
-      var id = btn.getAttribute('data-cal-salvar-registro');
-      var registro = STATE.registros.filter(function(r){ return r.id===id; })[0];
-      var input = $('[data-cal-hora-edit="'+id+'"]');
-      if(!registro || !input || !input.value){ return; }
-      // Mantém o mesmo dia do registro original, só troca a hora:minuto.
-      var diaKey = todayKey(new Date(registro.ts));
-      var novoTs = new Date(diaKey+'T'+input.value+':00').toISOString();
-      var horaAntiga = fmtTime(registro.ts);
-      updateRegistro(id, {ts: novoTs});
-      logAtividade('Horário de '+(registro.tipo==='entrada'?'chegada':'saída')+' de '+fmtDateBR(diaKey)+' corrigido de '+horaAntiga+' para '+input.value+'.');
-      toast('Horário atualizado.');
-      UI.calendarioEditandoRegistroId = null;
-      persist();
-    });
-  });
-  $all('[data-cal-add-ponto]').forEach(function(form){
-    form.addEventListener('submit', function(e){
-      e.preventDefault();
-      var diaKey = form.getAttribute('data-cal-add-ponto');
-      var aluno = studentById(UI.calendarioAlunoId);
-      if(!aluno) return;
-      var fd = new FormData(form);
-      var tipo = fd.get('tipo');
-      var horario = fd.get('horario');
-      if(!horario){ toast('Informe o horário.', 'err'); return; }
-      var ts = new Date(diaKey+'T'+horario+':00').toISOString();
-      addRegistro({id: uid('r'), studentId: aluno.id, tipo: tipo, ts: ts, origem: 'manual-admin'});
-      logAtividade((tipo==='entrada'?'Chegada':'Saída')+' de '+aluno.nome+' em '+fmtDateBR(diaKey)+' às '+horario+' adicionada manualmente.');
-      toast('Ponto adicionado.');
-      persist();
     });
   });
 
