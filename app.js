@@ -1288,14 +1288,19 @@ function calendarioAluno(s){
     totalMin += mins;
     var key = todayKey(d);
 
+    // Dia combinado de trabalho = fica com contorno vermelho, tenha ou não
+    // registro. Combinado com o preenchido verde (has-reg, quando bateu
+    // ponto), dá pra ler os dois casos direto no calendário: contornado sem
+    // verde = faltou num dia combinado; verde sem contorno = veio num dia
+    // que não era combinado.
     var deveriaVir = temProgramacao && diasCombinados.indexOf(DIA_SEMANA_CODE[d.getDay()]) !== -1;
-    var alertaFalta = !futuro && temProgramacao && deveriaVir && !temRegistro;
-    var alertaExtra = !futuro && temProgramacao && !deveriaVir && temRegistro;
-    var alertaTitulo = alertaFalta ? 'Dia de trabalho combinado, mas sem ponto batido' : (alertaExtra ? 'Veio num dia que não é combinado' : '');
+    var faltou = !futuro && deveriaVir && !temRegistro;
+    var veioExtra = !futuro && temProgramacao && !deveriaVir && temRegistro;
+    var titulo = deveriaVir ? (faltou ? 'Dia de trabalho combinado — sem ponto batido' : 'Dia de trabalho combinado') : (veioExtra ? 'Veio num dia que não é combinado' : '');
 
-    var cls = 'cal-cell' + (temRegistro?' has-reg':'') + (key===hojeKey?' is-today':'') + (UI.calendarioDiaSel===key?' selected':'') + (futuro?' cal-futuro':'') + ((alertaFalta||alertaExtra)?' cal-alerta':'');
+    var cls = 'cal-cell' + (temRegistro?' has-reg':'') + (key===hojeKey?' is-today':'') + (UI.calendarioDiaSel===key?' selected':'') + (futuro?' cal-futuro':'') + (deveriaVir?' cal-programado':'') + (veioExtra?' cal-extra':'');
     return (
-      '<button class="'+cls+'" type="button" data-cal-dia="'+key+'"'+(futuro?' disabled style="opacity:.35;cursor:default;"':'')+(alertaTitulo?' title="'+esc(alertaTitulo)+'"':'')+'>' +
+      '<button class="'+cls+'" type="button" data-cal-dia="'+key+'"'+(futuro?' disabled style="opacity:.35;cursor:default;"':'')+(titulo?' title="'+esc(titulo)+'"':'')+'>' +
         '<span class="cal-daynum">'+d.getDate()+'</span>' +
         (mins>0 ? '<span class="cal-hours">'+fmtHoras(mins)+'</span>' : (temRegistro ? '<span class="cal-hours">—</span>' : '')) +
       '</button>'
@@ -1366,7 +1371,7 @@ function calendarioAluno(s){
     mesNav +
     '<div class="cal-weekdays">'+headerDias+'</div>' +
     '<div class="cal-grid">'+padCells+cells+'</div>' +
-    '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados.'+(temProgramacao ? ' Dias contornados em <span style="color:var(--critical);font-weight:600;">vermelho</span> são falta num dia combinado ou presença num dia que não era combinado.' : '')+'</div>' +
+    '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados.</div>' +
     diaSelInfo
   );
 }
