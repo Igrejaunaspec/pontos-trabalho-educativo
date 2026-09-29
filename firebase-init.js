@@ -405,19 +405,25 @@ window.__pontosRejeitarCadastro = function(uidCadastro){
    tela de Alunos mostra) — os cadastros "fantasma" (studentId
    gerado, ex. "s_xxxxx") em geral nunca foram salvos dentro de
    app/state.students, só existem soltos na coleção, então só
-   aparecem lendo a coleção inteira. Agrupa por RA e separa, em cada
-   grupo, o cadastro "oficial" (id no formato "sNN-nome") dos
+   aparecem lendo a coleção inteira. Agrupa primeiro por RA (quando os
+   dois lados têm RA preenchido e igual) e, pro que sobrar, também por
+   nome completo igual — cobre o caso de um cadastro oficial
+   importado incompleto (sem RA) que ganhou depois um fantasma com o
+   RA certo, criado quando a pessoa se autocadastrou. Em cada grupo,
+   separa o cadastro "oficial" (id no formato "sNN-nome") dos
    "fantasmas" (id "s_xxxxx"); devolve {pares, manual} — pares é a
-   lista de {stubId, officialId, nome, ra} prontos pra corrigir, e
-   manual é os grupos com RA repetido sem um oficial claro (ex.: duas
-   contas fantasma da mesma pessoa), que ficam de fora da correção
-   automática.
+   lista de {stubId, officialId, nome, ra, raFantasma, bolsaFantasma}
+   prontos pra corrigir, e manual é os grupos repetidos sem um oficial
+   claro (ex.: duas contas fantasma da mesma pessoa), que ficam de
+   fora da correção automática.
 
    window.__pontosCorrigirDuplicados(pares) migra, para cada par:
    todo registro de ponto do fantasma passa a apontar pro oficial; o
    login (alunoAuth) que estava ligado ao fantasma passa a apontar
    pro oficial; alunoClaimed do oficial é marcado com esse login; o
-   alunoClaimed do fantasma é removido; e o próprio documento
+   alunoClaimed do fantasma é removido; o RA/bolsa do fantasma são
+   copiados pro oficial SE o oficial estiver com esses campos vazios
+   (caso do cadastro incompleto); e o próprio documento
    students/{fantasma} é marcado ativo:false com uma observação —
    direto na coleção, já que ele normalmente não está dentro de
    app/state.students pra ser desativado pelo caminho normal
@@ -426,25 +432,62 @@ window.__pontosRejeitarCadastro = function(uidCadastro){
    ============================================================ */
 window.__pontosDetectarDuplicados = function(){
   return getDocs(collection(db, 'students')).then(function(snap){
-    var porRA = {};
+    var todos = [];
     snap.forEach(function(d){
       var s = Object.assign({}, d.data(), {id: d.id});
+      if(s.ativo===false) return;
+      todos.push(s);
+    });
+
+    var usados = {};
+    var pares = [], manual = [];
+
+    // 1ª passada: agrupa por RA (comportamento original).
+    var porRA = {};
+    todos.forEach(function(s){
       var ra = String(s.ra||'').trim();
-      if(!ra || s.ativo===false) return;
+      if(!ra) return;
       (porRA[ra] = porRA[ra] || []).push(s);
     });
-    var pares = [], manual = [];
     Object.keys(porRA).forEach(function(ra){
       var grupo = porRA[ra];
       if(grupo.length < 2) return;
       var oficiais = grupo.filter(function(s){ return !/^s_/.test(s.id); });
       var fantasmas = grupo.filter(function(s){ return /^s_/.test(s.id); });
       if(oficiais.length===1 && fantasmas.length>=1){
-        fantasmas.forEach(function(f){ pares.push({stubId: f.id, officialId: oficiais[0].id, nome: oficiais[0].nome, ra: ra}); });
+        fantasmas.forEach(function(f){
+          pares.push({stubId: f.id, officialId: oficiais[0].id, nome: oficiais[0].nome, ra: ra, raFantasma: f.ra||'', bolsaFantasma: f.bolsa||''});
+          usados[f.id] = true; usados[oficiais[0].id] = true;
+        });
       } else {
         manual.push({ra: ra, nomes: grupo.map(function(s){return s.nome;})});
+        grupo.forEach(function(s){ usados[s.id] = true; });
       }
     });
+
+    // 2ª passada: pro que sobrou (não pareado por RA), agrupa por nome
+    // completo igual — pega o caso do oficial sem RA + fantasma com RA.
+    var porNome = {};
+    todos.forEach(function(s){
+      if(usados[s.id]) return;
+      var chave = String(s.nome||'').trim().toLowerCase();
+      if(!chave) return;
+      (porNome[chave] = porNome[chave] || []).push(s);
+    });
+    Object.keys(porNome).forEach(function(nome){
+      var grupo = porNome[nome];
+      if(grupo.length < 2) return;
+      var oficiais = grupo.filter(function(s){ return !/^s_/.test(s.id); });
+      var fantasmas = grupo.filter(function(s){ return /^s_/.test(s.id); });
+      if(oficiais.length===1 && fantasmas.length>=1){
+        fantasmas.forEach(function(f){
+          pares.push({stubId: f.id, officialId: oficiais[0].id, nome: oficiais[0].nome, ra: f.ra || oficiais[0].ra || '', raFantasma: f.ra||'', bolsaFantasma: f.bolsa||''});
+        });
+      } else {
+        manual.push({ra: '(mesmo nome)', nomes: grupo.map(function(s){return s.nome;})});
+      }
+    });
+
     return {pares: pares, manual: manual};
   });
 };
@@ -455,9 +498,12 @@ window.__pontosCorrigirDuplicados = function(pares){
   return Promise.all([
     getDocs(collection(db, 'alunoAuth')),
     getDocs(collection(db, 'registros')),
-    getDocs(collection(db, 'pedidos'))
+    getDocs(collection(db, 'pedidos')),
+    getDocs(collection(db, 'students'))
   ]).then(function(results){
-    var authSnap = results[0], regSnap = results[1], pedSnap = results[2];
+    var authSnap = results[0], regSnap = results[1], pedSnap = results[2], studSnap = results[3];
+    var studPorId = {};
+    studSnap.forEach(function(d){ studPorId[d.id] = d.data(); });
     var authPorStudentId = {};
     authSnap.forEach(function(d){
       var data = d.data();
@@ -499,6 +545,17 @@ window.__pontosCorrigirDuplicados = function(pares){
         ativo: false,
         observacao: 'Cadastro duplicado (mesmo RA '+par.ra+') — mesclado com '+par.officialId+' em '+hoje+' pela ferramenta "Corrigir cadastros duplicados".'
       }});
+
+      // Preenche RA/bolsa do oficial se estiverem vazios e o fantasma tiver
+      // esses dados (caso do cadastro oficial importado incompleto).
+      var oficialAtual = studPorId[par.officialId] || {};
+      var patchOficial = {};
+      if(!String(oficialAtual.ra||'').trim() && par.raFantasma) patchOficial.ra = par.raFantasma;
+      if(!String(oficialAtual.bolsa||'').trim() && par.bolsaFantasma) patchOficial.bolsa = par.bolsaFantasma;
+      if(Object.keys(patchOficial).length){
+        ops.push({ref: doc(db, 'students', par.officialId), data: patchOficial});
+        par.camposPreenchidos = patchOficial;
+      }
     });
 
     var chunks = [];
