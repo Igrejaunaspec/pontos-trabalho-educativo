@@ -1404,13 +1404,12 @@ function renderCalendarioDiaModal(){
     '</div>';
   }).join('') || '<div class="empty-state">Nenhum registro nesse dia.</div>';
   var formAddPonto =
-    '<form class="log-item" data-cal-add-ponto="'+UI.calendarioDiaSel+'" style="margin-top:4px;">' +
-      '<select name="tipo" style="width:auto;">' +
-        '<option value="entrada">Chegada</option>' +
-        '<option value="saida">Saída</option>' +
-      '</select>' +
-      '<input type="time" name="horario" class="mono" style="width:auto;" required>' +
-      '<button class="btn btn-sm btn-primary" type="submit">+ Adicionar ponto</button>' +
+    '<form data-cal-add-ponto="'+UI.calendarioDiaSel+'" style="margin-top:4px;display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--surface);border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);">' +
+      '<div style="display:flex;gap:10px;">' +
+        '<label style="flex:1;font-size:11.5px;color:var(--muted);">Chegada<input type="time" name="inicio" class="mono"></label>' +
+        '<label style="flex:1;font-size:11.5px;color:var(--muted);">Saída<input type="time" name="fim" class="mono"></label>' +
+      '</div>' +
+      '<button class="btn btn-sm btn-primary" type="submit">+ Adicionar ponto(s)</button>' +
     '</form>';
 
   var overlay = document.createElement('div');
@@ -1485,13 +1484,20 @@ function renderCalendarioDiaModal(){
       var aluno = studentById(UI.calendarioAlunoId);
       if(!aluno) return;
       var fd = new FormData(form);
-      var tipo = fd.get('tipo');
-      var horario = fd.get('horario');
-      if(!horario){ toast('Informe o horário.', 'err'); return; }
-      var ts = new Date(diaKey+'T'+horario+':00').toISOString();
-      addRegistro({id: uid('r'), studentId: aluno.id, tipo: tipo, ts: ts, origem: 'manual-admin'});
-      logAtividade((tipo==='entrada'?'Chegada':'Saída')+' de '+aluno.nome+' em '+fmtDateBR(diaKey)+' às '+horario+' adicionada manualmente.');
-      toast('Ponto adicionado.');
+      var inicio = fd.get('inicio');
+      var fim = fd.get('fim');
+      if(!inicio && !fim){ toast('Informe a chegada, a saída, ou as duas.', 'err'); return; }
+      var partes = [];
+      if(inicio){
+        addRegistro({id: uid('r'), studentId: aluno.id, tipo:'entrada', ts: new Date(diaKey+'T'+inicio+':00').toISOString(), origem: 'manual-admin'});
+        partes.push('chegada às '+inicio);
+      }
+      if(fim){
+        addRegistro({id: uid('r'), studentId: aluno.id, tipo:'saida', ts: new Date(diaKey+'T'+fim+':00').toISOString(), origem: 'manual-admin'});
+        partes.push('saída às '+fim);
+      }
+      logAtividade('Ponto de '+aluno.nome+' em '+fmtDateBR(diaKey)+' ('+partes.join(' e ')+') adicionado manualmente.');
+      toast(partes.length>1 ? 'Chegada e saída adicionadas.' : 'Ponto adicionado.');
       persist();
     });
   });
