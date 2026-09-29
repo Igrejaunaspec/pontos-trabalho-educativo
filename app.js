@@ -1980,7 +1980,7 @@ function bindEvents(){
     });
   });
   $all('[data-cal-dia]').forEach(function(btn){
-    btn.addEventListener('click', function(){
+    btn.addEventListener('dblclick', function(){
       var key = btn.getAttribute('data-cal-dia');
       UI.calendarioDiaSel = key;
       UI.calendarioEditandoRegistroId = null;
