@@ -559,9 +559,6 @@ function viewDashboard(dateLabel){
   var total = STATE.students.filter(function(s){return s.ativo;}).length;
   var pend = pedidosPendentes();
   var aniversariantes = aniversariantesDoMes();
-  var minutosSemana = 0;
-  var weekAgo = new Date(Date.now() - 7*24*3600*1000).toISOString();
-  STATE.students.forEach(function(s){ minutosSemana += minutosTrabalhados(s.id, weekAgo); });
 
   var maioresPendencias = STATE.students
     .filter(function(s){ var k=pendenteKind(s.pendenteHerdada); return k==='warn'||k==='crit'; })
@@ -587,12 +584,9 @@ function viewDashboard(dateLabel){
   return (
     '<div class="view-head"><div><h1>Visão geral</h1><div class="view-sub">Painel de administração dos bolsistas do trabalho educativo.</div></div><div class="date">'+dateLabel+'</div></div>' +
 
-    '<div class="banner">Este é o primeiro passo do sistema: os perfis dos '+STATE.students.length+' bolsistas foram importados da planilha. O controle de ponto (chegada/saída) e os pedidos de ajuste começam a contar a partir de agora — a coluna “pendência herdada” abaixo é só o histórico anterior, para referência.</div>' +
-
     '<div class="stat-grid">' +
       '<div class="stat-card accent"><span class="label">Bolsistas ativos</span><span class="value mono">'+total+'</span><span class="hint">em '+STATE.setores.length+' setores</span></div>' +
       '<div class="stat-card"><span class="label">Pedidos aguardando</span><span class="value mono">'+pend.length+'</span><span class="hint">de ajuste de ponto</span></div>' +
-      '<div class="stat-card"><span class="label">Horas registradas (7 dias)</span><span class="value mono">'+fmtHoras(minutosSemana)+'</span><span class="hint">via chegada/saída no sistema</span></div>' +
       '<div class="stat-card"><span class="label">Aniversariantes do mês</span><span class="value mono">'+aniversariantes.length+'</span><span class="hint">'+MESES[new Date().getMonth()]+'</span></div>' +
     '</div>' +
 
@@ -1722,6 +1716,16 @@ function renderDrawer(){
   });
   var excluirBtn = $('[data-drawer-excluir]', overlay);
   if(excluirBtn) excluirBtn.addEventListener('click', function(){ excluirCadastroPermanente(s); });
+  var verCalendarioBtn = $('[data-drawer-ver-calendario]', overlay);
+  if(verCalendarioBtn) verCalendarioBtn.addEventListener('click', function(){
+    closeDrawer();
+    UI.view = 'calendario';
+    UI.calendarioAlunoId = s.id;
+    UI.calendarioMesOffset = 0;
+    UI.calendarioDiaSel = null;
+    UI.calendarioDiaPreview = null;
+    render();
+  });
   var linkAcessoBtn = $('[data-drawer-link-acesso]', overlay);
   if(linkAcessoBtn) linkAcessoBtn.addEventListener('click', function(){
     var link = location.origin + location.pathname + '?ra=' + encodeURIComponent(s.ra) + '&nome=' + encodeURIComponent(s.nome);
@@ -1771,7 +1775,7 @@ function drawerView(s){
     '</div>' +
 
     '<div class="stat-grid">' +
-      '<div class="stat-card"><span class="label">Horas no sistema</span><span class="value mono">'+fmtHoras(minutosTrabalhados(s.id))+'</span></div>' +
+      '<button type="button" class="stat-card" data-drawer-ver-calendario style="cursor:pointer;text-align:left;font:inherit;appearance:none;-webkit-appearance:none;width:100%;">📅 <span class="label">Calendário deste aluno</span><span class="hint">ver dias, horas e horários batidos</span></button>' +
       '<div class="stat-card accent"><span class="label">Pontos</span><span class="value mono">'+pontosDoAluno(s.id)+'</span></div>' +
     '</div>' +
 
