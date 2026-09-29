@@ -189,7 +189,7 @@ function proximoTipo(id){
   if(!last || last.tipo === 'saida') return 'entrada';
   return 'saida';
 }
-function minutosTrabalhados(id, sinceISO){
+function minutosTrabalhados(id, sinceISO, untilISO){
   var list = registrosDoAluno(id);
   var total = 0;
   // Pilha (não uma única variável) — necessário porque um aluno pode ter
@@ -203,6 +203,7 @@ function minutosTrabalhados(id, sinceISO){
   for(var i=0;i<list.length;i++){
     var r = list[i];
     if(sinceISO && r.ts < sinceISO) continue;
+    if(untilISO && r.ts >= untilISO) continue;
     if(r.tipo === 'entrada'){
       pilha.push(r.ts);
     } else if(r.tipo === 'saida' && pilha.length){
@@ -211,6 +212,46 @@ function minutosTrabalhados(id, sinceISO){
     }
   }
   return total;
+}
+/* Intervalo [início, fimExclusivo) do mês atual e do mês anterior, meia-noite
+   local, como ISO — para bater "horas devidas este mês" (contra a meta
+   proporcional aos dias já passados) e "horas do mês passado" (total do mês
+   fechado). "dias" é o total de dias corridos daquele mês, usado na meta. */
+function mesAtualRangeISO(){
+  var hoje = new Date();
+  var inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  var fim = new Date(hoje.getFullYear(), hoje.getMonth()+1, 1);
+  return {inicio: localMidnightISO(inicio), fim: localMidnightISO(fim), dias: hoje.getDate()};
+}
+function mesAnteriorRangeISO(){
+  var hoje = new Date();
+  var inicio = new Date(hoje.getFullYear(), hoje.getMonth()-1, 1);
+  var fim = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  var dias = Math.round((fim-inicio)/86400000);
+  return {inicio: localMidnightISO(inicio), fim: localMidnightISO(fim), dias: dias};
+}
+/* Saldo de horas devidas no mês ATUAL (desde o dia 1 até hoje) contra a
+   carga horária semanal cadastrada, proporcional aos dias já passados no
+   mês — mesma lógica de saldoMesInfo(), reaproveitada aqui para o card do
+   calendário do aluno. */
+function horasDevidasMesAtual(s){
+  if(!s.horasSemana) return {saldo: null, minsTrabalhados: 0};
+  var r = mesAtualRangeISO();
+  var mins = minutosTrabalhados(s.id, r.inicio, r.fim);
+  var meta = (s.horasSemana||0) * 60 * (r.dias/7);
+  return {saldo: mins - meta, minsTrabalhados: mins};
+}
+/* Total de horas trabalhadas no mês PASSADO (mês fechado, do dia 1 ao
+   último dia) — para o card "Horas do mês passado" do calendário do aluno. */
+function horasMesPassado(s){
+  var r = mesAnteriorRangeISO();
+  var mins = minutosTrabalhados(s.id, r.inicio, r.fim);
+  var info = {minsTrabalhados: mins, saldo: null};
+  if(s.horasSemana){
+    var meta = (s.horasSemana||0) * 60 * (r.dias/7);
+    info.saldo = mins - meta;
+  }
+  return info;
 }
 /* Registros de um aluno num dia específico (calendário local), já ordenados. */
 function registrosDoAlunoNoDia(id, d){
@@ -1238,6 +1279,19 @@ function calendarioAluno(s){
     }
   }
 
+  var devidas = horasDevidasMesAtual(s);
+  var devidasCard = devidas.saldo===null ?
+    '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono">—</span><span class="hint">carga horária não definida</span></div>' :
+    devidas.saldo<0 ?
+      '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono" style="color:var(--danger,#d33);">'+fmtHoras(-devidas.saldo)+'</span><span class="hint">devendo até hoje</span></div>' :
+      '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono">Em dia</span><span class="hint">'+(devidas.saldo>0?'+'+fmtHoras(devidas.saldo)+' de folga':'—')+'</span></div>';
+
+  var mesPass = horasMesPassado(s);
+  var mesPassadoCard =
+    '<div class="stat-card"><span class="label">Horas do mês passado</span><span class="value mono">'+fmtHoras(mesPass.minsTrabalhados)+'</span>' +
+      '<span class="hint">'+(mesPass.saldo===null ? 'total do mês' : (mesPass.saldo<0 ? fmtHoras(-mesPass.saldo)+' abaixo da meta' : mesPass.saldo>0 ? '+'+fmtHoras(mesPass.saldo)+' acima da meta' : 'bateu a meta'))+'</span>' +
+    '</div>';
+
   return (
     '<div class="punch-status" style="margin-bottom:14px;">' +
       '<span class="avatar" style="width:44px;height:44px;font-size:15px;">'+initials(s.nome)+'</span>' +
@@ -1247,6 +1301,8 @@ function calendarioAluno(s){
     '<div class="stat-grid" style="margin-bottom:14px;">' +
       '<div class="stat-card"><span class="label">Dias com registro</span><span class="value mono">'+totalDiasComRegistro+'/30</span><span class="hint">nos últimos 30 dias</span></div>' +
       '<div class="stat-card"><span class="label">Total de horas</span><span class="value mono">'+fmtHoras(totalMin)+'</span><span class="hint">no período</span></div>' +
+      devidasCard +
+      mesPassadoCard +
     '</div>' +
     '<div class="cal-weekdays">'+headerDias+'</div>' +
     '<div class="cal-grid">'+padCells+cells+'</div>' +
