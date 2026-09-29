@@ -30,7 +30,8 @@ function freshUI(){
     configTab: 'bolsas',
     calendarioAlunoId: null,
     calendarioBusca: '',
-    calendarioDiaSel: null
+    calendarioDiaSel: null,
+    calendarioMesOffset: 0
   };
 }
 var SYNC = 'idle'; // idle | busy | off
@@ -1230,21 +1231,28 @@ function viewCalendario(){
 function calendarioAluno(s){
   var hoje = new Date(); hoje.setHours(0,0,0,0);
   var hojeKey = todayKey(hoje);
+
+  // Mês de referência do calendário = mês atual + offset (offset<=0; não dá
+  // pra avançar além do mês atual, só voltar com a seta "‹").
+  var offset = UI.calendarioMesOffset || 0;
+  var mesRef = new Date(hoje.getFullYear(), hoje.getMonth()+offset, 1);
+  var ultimoDiaMes = new Date(mesRef.getFullYear(), mesRef.getMonth()+1, 0).getDate();
   var dias = [];
-  for(var i=29;i>=0;i--){
-    dias.push(new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()-i));
+  for(var dnum=1; dnum<=ultimoDiaMes; dnum++){
+    dias.push(new Date(mesRef.getFullYear(), mesRef.getMonth(), dnum));
   }
 
   var totalDiasComRegistro = 0, totalMin = 0;
   var cells = dias.map(function(d){
-    var mins = minutosNoDia(s.id, d);
-    var temRegistro = registrosDoAlunoNoDia(s.id, d).length > 0;
+    var futuro = d > hoje;
+    var mins = futuro ? 0 : minutosNoDia(s.id, d);
+    var temRegistro = !futuro && registrosDoAlunoNoDia(s.id, d).length > 0;
     if(temRegistro) totalDiasComRegistro++;
     totalMin += mins;
     var key = todayKey(d);
-    var cls = 'cal-cell' + (temRegistro?' has-reg':'') + (key===hojeKey?' is-today':'') + (UI.calendarioDiaSel===key?' selected':'');
+    var cls = 'cal-cell' + (temRegistro?' has-reg':'') + (key===hojeKey?' is-today':'') + (UI.calendarioDiaSel===key?' selected':'') + (futuro?' cal-futuro':'');
     return (
-      '<button class="'+cls+'" type="button" data-cal-dia="'+key+'">' +
+      '<button class="'+cls+'" type="button" data-cal-dia="'+key+'"'+(futuro?' disabled style="opacity:.35;cursor:default;"':'')+'>' +
         '<span class="cal-daynum">'+d.getDate()+'</span>' +
         (mins>0 ? '<span class="cal-hours">'+fmtHoras(mins)+'</span>' : (temRegistro ? '<span class="cal-hours">—</span>' : '')) +
       '</button>'
@@ -1257,6 +1265,13 @@ function calendarioAluno(s){
   for(var p=0;p<primeiroDiaSemana;p++){ padCells += '<span class="cal-cell cal-pad" aria-hidden="true"></span>'; }
 
   var headerDias = DIAS_SEMANA_CURTO_SEG.map(function(d){ return '<span class="cal-weekday">'+d+'</span>'; }).join('');
+
+  var mesNav =
+    '<div class="cal-nav" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">' +
+      '<button class="btn btn-sm btn-ghost" type="button" data-cal-mes="-1" aria-label="Mês anterior" title="Mês anterior">‹</button>' +
+      '<span class="cal-mes-label" style="font-weight:600;text-transform:capitalize;">'+MESES[mesRef.getMonth()]+' de '+mesRef.getFullYear()+'</span>' +
+      '<button class="btn btn-sm btn-ghost" type="button" data-cal-mes="1" aria-label="Próximo mês" title="Próximo mês"'+(offset>=0?' disabled':'')+'>›</button>' +
+    '</div>';
 
   var diaSelInfo = '';
   if(UI.calendarioDiaSel){
@@ -1300,11 +1315,12 @@ function calendarioAluno(s){
       '<span class="state">Bolsa '+esc(s.bolsa||'—')+' · '+horasSemanaLabel(s)+'</span>' +
     '</div>' +
     '<div class="stat-grid" style="margin-bottom:14px;">' +
-      '<div class="stat-card"><span class="label">Dias com registro</span><span class="value mono">'+totalDiasComRegistro+'/30</span><span class="hint">nos últimos 30 dias</span></div>' +
-      '<div class="stat-card"><span class="label">Total de horas</span><span class="value mono">'+fmtHoras(totalMin)+'</span><span class="hint">no período</span></div>' +
+      '<div class="stat-card"><span class="label">Dias com registro</span><span class="value mono">'+totalDiasComRegistro+'/'+ultimoDiaMes+'</span><span class="hint">em '+MESES[mesRef.getMonth()]+'</span></div>' +
+      '<div class="stat-card"><span class="label">Total de horas</span><span class="value mono">'+fmtHoras(totalMin)+'</span><span class="hint">no mês exibido</span></div>' +
       devidasCard +
       mesPassadoCard +
     '</div>' +
+    mesNav +
     '<div class="cal-weekdays">'+headerDias+'</div>' +
     '<div class="cal-grid">'+padCells+cells+'</div>' +
     '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados.</div>' +
@@ -1771,6 +1787,7 @@ function bindEvents(){
   $all('[data-select-calendario]').forEach(function(item){
     item.addEventListener('click', function(){
       UI.calendarioDiaSel = null;
+      UI.calendarioMesOffset = 0;
       toggleAccordion('calendarioAlunoId', item.getAttribute('data-select-calendario'));
       render();
     });
@@ -1779,6 +1796,15 @@ function bindEvents(){
     btn.addEventListener('click', function(){
       var key = btn.getAttribute('data-cal-dia');
       UI.calendarioDiaSel = UI.calendarioDiaSel===key ? null : key;
+      render();
+    });
+  });
+  $all('[data-cal-mes]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var delta = parseInt(btn.getAttribute('data-cal-mes'),10) || 0;
+      var novo = UI.calendarioMesOffset + delta;
+      UI.calendarioMesOffset = novo > 0 ? 0 : novo; // não deixa avançar além do mês atual
+      UI.calendarioDiaSel = null;
       render();
     });
   });
