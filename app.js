@@ -1306,7 +1306,12 @@ function viewCalendario(){
   );
 }
 
-function calendarioAluno(s){
+/* Corpo do calendário (cards do mês + grade de dias) — usado tanto no
+   calendário que o admin vê de qualquer aluno (calendarioAluno, com um
+   cabeçalho extra) quanto direto no painel do próprio aluno logado
+   (viewAlunoPainel, sem cabeçalho e sem o clique duplo de editar). */
+function calendarioCorpo(s, opts){
+  opts = opts || {};
   var hoje = new Date(); hoje.setHours(0,0,0,0);
   var hojeKey = todayKey(hoje);
 
@@ -1391,12 +1396,6 @@ function calendarioAluno(s){
     '</div>';
 
   return (
-    '<div class="punch-status" style="margin-bottom:14px;">' +
-      '<span class="avatar" style="width:44px;height:44px;font-size:15px;">'+initials(s.nome)+'</span>' +
-      '<span class="who">'+esc(s.nome)+'</span>' +
-      '<span class="state">'+esc(s.setorNome || setorNome(s.setor))+' · '+nivelLabel(s.nivel)+'</span>' +
-      '<span class="state">Bolsa '+esc(s.bolsa||'—')+' · '+horasSemanaLabel(s)+'</span>' +
-    '</div>' +
     '<div class="stat-grid" style="margin-bottom:14px;">' +
       '<div class="stat-card"><span class="label">Dias com registro</span><span class="value mono">'+totalDiasComRegistro+'/'+ultimoDiaMes+'</span><span class="hint">em '+MESES[mesRef.getMonth()]+'</span></div>' +
       '<div class="stat-card"><span class="label">Total de horas</span><span class="value mono">'+fmtHoras(totalMin)+'</span><span class="hint">no mês exibido</span></div>' +
@@ -1407,7 +1406,22 @@ function calendarioAluno(s){
     '<div class="cal-weekdays">'+headerDias+'</div>' +
     '<div class="cal-grid">'+padCells+cells+'</div>' +
     previewDiaHtml(s, UI.calendarioDiaPreview) +
-    '<div class="view-sub" style="margin-top:10px;">Clique num dia para ver os horários registrados. Clique duas vezes para editar ou adicionar um ponto.</div>'
+    '<div class="view-sub" style="margin-top:10px;">'+(opts.editavel!==false ? 'Clique num dia para ver os horários registrados. Clique duas vezes para editar ou adicionar um ponto.' : 'Clique num dia pra ver os horários registrados.')+'</div>'
+  );
+}
+
+/* Calendário do aluno usado no painel do ADMIN — mesmo corpo acima, só que
+   com o cabeçalho (avatar/nome/setor/bolsa) que faz sentido lá, já que o
+   admin pode estar olhando qualquer aluno da lista. */
+function calendarioAluno(s){
+  return (
+    '<div class="punch-status" style="margin-bottom:14px;">' +
+      '<span class="avatar" style="width:44px;height:44px;font-size:15px;">'+initials(s.nome)+'</span>' +
+      '<span class="who">'+esc(s.nome)+'</span>' +
+      '<span class="state">'+esc(s.setorNome || setorNome(s.setor))+' · '+nivelLabel(s.nivel)+'</span>' +
+      '<span class="state">Bolsa '+esc(s.bolsa||'—')+' · '+horasSemanaLabel(s)+'</span>' +
+    '</div>' +
+    calendarioCorpo(s, {editavel:true})
   );
 }
 
@@ -2230,13 +2244,16 @@ function preserveFocus(sel){
    ============================================================ */
 function viewAlunoPainel(){
   var s = STATE.students[0];
+  // Conservação não bate ponto nem pede ajuste pelo próprio login — isso é
+  // feito pela liderança/administração. O painel do aluno da Conservação
+  // fica só de consulta: calendário, saldo e histórico dos pontos batidos
+  // por outra pessoa.
   var conservacao = isConservacao(s);
   var last = ultimoRegistro(s.id);
   var next = proximoTipo(s.id);
   var statusText;
   if(conservacao){
-    var nTurnos = turnosHojeCount(s.id);
-    statusText = nTurnos>0 ? (nTurnos===1 ? '1 turno registrado hoje.' : nTurnos+' turnos registrados hoje.') : 'Nenhum turno registrado hoje.';
+    statusText = 'Seu ponto é registrado pela liderança — aqui você só acompanha.';
   } else if(!last){
     statusText = 'Você ainda não bateu o ponto hoje.';
   } else if(last.tipo==='entrada'){
@@ -2250,20 +2267,6 @@ function viewAlunoPainel(){
     : saldoInfo.saldo>=0 ? fmtHoras(saldoInfo.saldo) + ' a mais esta semana'
     : fmtHoras(-saldoInfo.saldo) + ' devendo esta semana';
   var saldoCls = saldoInfo.cls;
-
-  var resumoMes = resumoMesAtualAluno(s);
-  var devidas = horasDevidasMesAtual(s);
-  var devidasCard = devidas.saldo===null ?
-    '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono">—</span><span class="hint">carga horária não definida</span></div>' :
-    devidas.saldo<0 ?
-      '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono" style="color:var(--danger,#d33);">'+fmtHoras(-devidas.saldo)+'</span><span class="hint">devendo até hoje</span></div>' :
-      '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono">Em dia</span><span class="hint">'+(devidas.saldo>0?'+'+fmtHoras(devidas.saldo)+' de folga':'—')+'</span></div>';
-
-  var mesPass = horasMesPassado(s);
-  var mesPassadoCard =
-    '<div class="stat-card"><span class="label">Horas do mês passado</span><span class="value mono">'+fmtHoras(mesPass.minsTrabalhados)+'</span>' +
-      '<span class="hint">'+(mesPass.saldo===null ? 'total do mês' : (mesPass.saldo<0 ? fmtHoras(-mesPass.saldo)+' abaixo da meta' : mesPass.saldo>0 ? '+'+fmtHoras(mesPass.saldo)+' acima da meta' : 'bateu a meta'))+'</span>' +
-    '</div>';
 
   var historico = registrosDoAluno(s.id).slice().reverse().slice(0,10).map(function(r){
     return '<div class="log-item"><span class="t">'+fmtDateTime(r.ts)+'</span><span>'+(r.tipo==='entrada'?'Chegada':'Saída')+'</span></div>';
@@ -2283,43 +2286,35 @@ function viewAlunoPainel(){
         '<div><div class="name">'+esc(s.nome)+'</div><div class="setor">'+esc(s.setorNome||'')+'</div></div>' +
       '</div>' +
       '<div class="view-sub">'+statusText+'</div>' +
-      (conservacao ?
-        ('<div class="punch-actions">' +
-          '<button class="btn btn-lg btn-primary" data-punch-turno-self>Marcar turno cumprido (+4h)</button>' +
-        '</div>' +
-        '<div class="view-sub">Pode apertar mais de uma vez no mesmo dia — por exemplo, um turno pela manhã e outro à noite.</div>')
-        :
+      (conservacao ? '' :
         ('<div class="punch-actions">' +
           '<button class="btn btn-lg btn-primary" data-punch-self="entrada" '+(next!=='entrada'?'disabled':'')+'>Marcar chegada agora</button>' +
           '<button class="btn btn-lg" data-punch-self="saida" '+(next!=='saida'?'disabled':'')+'>Marcar saída agora</button>' +
         '</div>')
       ) +
-      '<div class="stat-grid" style="margin-top:18px;">' +
-        '<div class="stat-card"><span class="label">Dias com registro</span><span class="value mono">'+resumoMes.totalDiasComRegistro+'/'+resumoMes.ultimoDiaMes+'</span><span class="hint">em '+resumoMes.mesLabel+'</span></div>' +
-        '<div class="stat-card"><span class="label">Total de horas</span><span class="value mono">'+fmtHoras(resumoMes.totalMin)+'</span><span class="hint">no mês atual</span></div>' +
-        devidasCard +
-        mesPassadoCard +
-      '</div>' +
-      '<div class="stat-card" style="margin-top:12px;">' +
+      '<div class="stat-card" style="margin-top:18px;">' +
         '<span class="label">Saldo desta semana</span>' +
         '<span class="pill '+saldoCls+'" style="font-size:14px;margin-top:6px;">'+saldoTxt+'</span>' +
         '<span class="hint">meta: '+(s.horasSemana?s.horasSemana+'h/semana':'—')+'</span>' +
       '</div>' +
+      '<div style="margin-top:18px;"><h3 style="font-size:13px;margin-bottom:8px;">Calendário</h3>'+calendarioCorpo(s, {editavel:false})+'</div>' +
       '<div style="margin-top:18px;"><h3 style="font-size:13px;margin-bottom:8px;">Últimos registros</h3><div class="log-list">'+historico+'</div></div>' +
-      '<div style="margin-top:22px;">' +
-        '<h3 style="font-size:13px;margin-bottom:8px;">Pedir ajuste de ponto</h3>' +
-        '<div class="view-sub" style="margin-bottom:10px;">Esqueceu de bater o ponto num horário certo? Peça o ajuste aqui — a administração aprova antes de valer nas suas horas.</div>' +
-        '<form id="form-pedido-aluno" style="display:flex;flex-direction:column;gap:10px;">' +
-          '<div class="field-row">' +
-            '<label>Data<input type="date" name="data" required value="'+todayKey()+'" max="'+todayKey()+'"></label>' +
-            '<label>Tipo<select name="tipoAlvo"><option value="entrada">Chegada</option><option value="saida">Saída</option></select></label>' +
-            '<label>Horário<input type="time" name="horario" required></label>' +
-          '</div>' +
-          '<label>Motivo<textarea name="motivo" placeholder="Ex.: esqueci de bater o ponto na chegada, cheguei às 13h"></textarea></label>' +
-          '<div><button class="btn btn-primary btn-sm" type="submit">Enviar pedido</button></div>' +
-        '</form>' +
-        '<div class="log-list" style="margin-top:14px;">'+pedidosHtml+'</div>' +
-      '</div>' +
+      (conservacao ? '' :
+        ('<div style="margin-top:22px;">' +
+          '<h3 style="font-size:13px;margin-bottom:8px;">Pedir ajuste de ponto</h3>' +
+          '<div class="view-sub" style="margin-bottom:10px;">Esqueceu de bater o ponto num horário certo? Peça o ajuste aqui — a administração aprova antes de valer nas suas horas.</div>' +
+          '<form id="form-pedido-aluno" style="display:flex;flex-direction:column;gap:10px;">' +
+            '<div class="field-row">' +
+              '<label>Data<input type="date" name="data" required value="'+todayKey()+'" max="'+todayKey()+'"></label>' +
+              '<label>Tipo<select name="tipoAlvo"><option value="entrada">Chegada</option><option value="saida">Saída</option></select></label>' +
+              '<label>Horário<input type="time" name="horario" required></label>' +
+            '</div>' +
+            '<label>Motivo<textarea name="motivo" placeholder="Ex.: esqueci de bater o ponto na chegada, cheguei às 13h"></textarea></label>' +
+            '<div><button class="btn btn-primary btn-sm" type="submit">Enviar pedido</button></div>' +
+          '</form>' +
+          '<div class="log-list" style="margin-top:14px;">'+pedidosHtml+'</div>' +
+        '</div>')
+      ) +
     '</div>'
   );
 }
@@ -2411,6 +2406,26 @@ function bindEventsAluno(){
       toast('Não foi possível enviar o pedido agora.', 'err');
     });
   });
+
+  // Calendário do próprio aluno — só leitura: 1 clique mostra os horários
+  // do dia logo abaixo (previewDiaHtml), sem o clique duplo de editar (isso
+  // continua sendo só a administração, lá no calendário dela).
+  $all('[data-cal-dia]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var key = btn.getAttribute('data-cal-dia');
+      UI.calendarioDiaPreview = UI.calendarioDiaPreview===key ? null : key;
+      renderAluno();
+    });
+  });
+  $all('[data-cal-mes]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var delta = parseInt(btn.getAttribute('data-cal-mes'),10) || 0;
+      var novo = (UI.calendarioMesOffset||0) + delta;
+      UI.calendarioMesOffset = novo > 0 ? 0 : novo;
+      UI.calendarioDiaPreview = null;
+      renderAluno();
+    });
+  });
 }
 
 /* ============================================================
@@ -2439,6 +2454,10 @@ window.__pontosStudentBoot = function(perfil, registros, pedidos){
     setores: [], lideres: [], bolsaHoras: {}, activityLog: [],
     pontosPorHora: 0, orgName: 'Trabalho Educativo'
   };
+  // freshUI() dá os campos do calendário (mês exibido, dia em preview etc.)
+  // que o calendarioCorpo() do próprio painel do aluno usa — sem isso UI
+  // fica null e o painel quebra ao tentar ler UI.calendarioMesOffset.
+  UI = freshUI();
   renderAluno();
 };
 window.__pontosStudentApply = function(perfil, registros, pedidos){
