@@ -1221,11 +1221,11 @@ function viewPonto(){
       '</div>'
   );
 
+  // Seleção múltipla só serve pra marcar turno da Conservação (+4h) — chegada
+  // e saída de um por um, por isso o único botão aqui é o de turno.
   var bulkActionBar = (bulk && nSel>0) ?
     '<div class="bulk-actionbar">' +
-      '<button class="btn btn-primary" data-bulk-punch="entrada" type="button">Marcar chegada de todos</button>' +
-      '<button class="btn" data-bulk-punch="saida" type="button">Marcar saída de todos</button>' +
-      '<button class="btn btn-ghost" data-bulk-punch-turno type="button">+4h (Conservação)</button>' +
+      '<button class="btn btn-primary" data-bulk-punch-turno type="button">+4h (Conservação)</button>' +
     '</div>'
     : '';
 
