@@ -1417,25 +1417,41 @@ function calendarioCorpo(s, opts){
       '<button class="btn btn-sm btn-ghost" type="button" data-cal-mes="1" aria-label="Próximo mês" title="Próximo mês"'+(offset>=0?' disabled':'')+'>›</button>' +
     '</div>';
 
+  // Horas a mais feitas ESTE mês abatem o que ficou devendo no mês passado.
+  // Só o excedente entra: se este mês ainda está devendo, nada é abatido.
+  // O que foi usado pra abater sai da folga deste mês (não conta duas vezes).
   var devidas = horasDevidasMesAtual(s);
+  var mesPass = horasMesPassado(s);
+  var devendoPassado = (mesPass.saldo!==null && mesPass.saldo<0) ? -mesPass.saldo : 0;
+  var sobraAtual = (devidas.saldo!==null && devidas.saldo>0) ? devidas.saldo : 0;
+  var abatido = Math.min(devendoPassado, sobraAtual);
+  var restantePassado = devendoPassado - abatido;
+  var folgaAtual = sobraAtual - abatido;
+
   var devidasCard = devidas.saldo===null ?
     '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono">—</span><span class="hint">carga horária não definida</span></div>' :
     devidas.saldo<0 ?
       '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono" style="color:var(--danger,#d33);">'+fmtHoras(-devidas.saldo)+'</span><span class="hint">devendo até hoje</span></div>' :
-      '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono">Em dia</span><span class="hint">'+(devidas.saldo>0?'+'+fmtHoras(devidas.saldo)+' de folga':'—')+'</span></div>';
+      '<div class="stat-card"><span class="label">Horas devidas este mês</span><span class="value mono">Em dia</span><span class="hint">' +
+        (abatido>0
+          ? (folgaAtual>0 ? '+'+fmtHoras(folgaAtual)+' de folga · ' : '') + fmtHoras(abatido)+' a mais foram pro mês passado'
+          : (devidas.saldo>0 ? '+'+fmtHoras(devidas.saldo)+' de folga' : '—')) +
+      '</span></div>';
 
-  var mesPass = horasMesPassado(s);
+  var fezTxt = 'fez '+fmtHoras(mesPass.minsTrabalhados);
   var mesPassadoCard =
-    // Card mostra quanto ficou DEVENDO no mês passado (o que fez vai pra dica).
     (mesPass.saldo===null ?
       '<div class="stat-card"><span class="label">Devidas do mês passado</span><span class="value mono">—</span>' +
-        '<span class="hint">carga horária não definida · fez '+fmtHoras(mesPass.minsTrabalhados)+'</span>'
-    : mesPass.saldo<0 ?
-      '<div class="stat-card"><span class="label">Devidas do mês passado</span><span class="value mono" style="color:var(--danger,#d33);">'+fmtHoras(-mesPass.saldo)+'</span>' +
-        '<span class="hint">ficou devendo · fez '+fmtHoras(mesPass.minsTrabalhados)+'</span>'
+        '<span class="hint">carga horária não definida · '+fezTxt+'</span>'
+    : devendoPassado>0 && restantePassado>0 ?
+      '<div class="stat-card"><span class="label">Devidas do mês passado</span><span class="value mono" style="color:var(--danger,#d33);">'+fmtHoras(restantePassado)+'</span>' +
+        '<span class="hint">'+(abatido>0 ? 'devia '+fmtHoras(devendoPassado)+', abateu '+fmtHoras(abatido)+' com horas a mais deste mês' : 'ficou devendo · '+fezTxt)+'</span>'
+    : devendoPassado>0 ?
+      '<div class="stat-card"><span class="label">Devidas do mês passado</span><span class="value mono" style="color:var(--success,#1F9E6D);">Quitado</span>' +
+        '<span class="hint">devia '+fmtHoras(devendoPassado)+', pagou com horas a mais deste mês</span>'
     :
       '<div class="stat-card"><span class="label">Devidas do mês passado</span><span class="value mono">Em dia</span>' +
-        '<span class="hint">'+(mesPass.saldo>0?'+'+fmtHoras(mesPass.saldo)+' acima da meta':'bateu a meta')+' · fez '+fmtHoras(mesPass.minsTrabalhados)+'</span>'
+        '<span class="hint">'+(mesPass.saldo>0?'+'+fmtHoras(mesPass.saldo)+' acima da meta':'bateu a meta')+' · '+fezTxt+'</span>'
     ) +
     '</div>';
 
