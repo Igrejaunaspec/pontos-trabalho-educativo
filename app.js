@@ -1426,8 +1426,17 @@ function calendarioCorpo(s, opts){
 
   var mesPass = horasMesPassado(s);
   var mesPassadoCard =
-    '<div class="stat-card"><span class="label">Horas do mês passado</span><span class="value mono">'+fmtHoras(mesPass.minsTrabalhados)+'</span>' +
-      '<span class="hint">'+(mesPass.saldo===null ? 'total do mês' : (mesPass.saldo<0 ? fmtHoras(-mesPass.saldo)+' abaixo da meta' : mesPass.saldo>0 ? '+'+fmtHoras(mesPass.saldo)+' acima da meta' : 'bateu a meta'))+'</span>' +
+    // Card mostra quanto ficou DEVENDO no mês passado (o que fez vai pra dica).
+    (mesPass.saldo===null ?
+      '<div class="stat-card"><span class="label">Devidas do mês passado</span><span class="value mono">—</span>' +
+        '<span class="hint">carga horária não definida · fez '+fmtHoras(mesPass.minsTrabalhados)+'</span>'
+    : mesPass.saldo<0 ?
+      '<div class="stat-card"><span class="label">Devidas do mês passado</span><span class="value mono" style="color:var(--danger,#d33);">'+fmtHoras(-mesPass.saldo)+'</span>' +
+        '<span class="hint">ficou devendo · fez '+fmtHoras(mesPass.minsTrabalhados)+'</span>'
+    :
+      '<div class="stat-card"><span class="label">Devidas do mês passado</span><span class="value mono">Em dia</span>' +
+        '<span class="hint">'+(mesPass.saldo>0?'+'+fmtHoras(mesPass.saldo)+' acima da meta':'bateu a meta')+' · fez '+fmtHoras(mesPass.minsTrabalhados)+'</span>'
+    ) +
     '</div>';
 
   return (
