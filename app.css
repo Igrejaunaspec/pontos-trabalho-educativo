@@ -492,8 +492,14 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
 .field-block{display:flex;flex-direction:column;gap:6px;}
 .field-block-label{font-size:12.5px;font-weight:600;color:var(--muted);}
 .dias-picker{display:flex;flex-wrap:wrap;gap:8px 16px;}
-.dias-picker .dia-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-soft);cursor:pointer;user-select:none;}
+.dias-picker .dia-check,.dia-check{display:inline-flex;flex-direction:row;align-items:center;gap:6px;font-size:13px;color:var(--ink-soft);cursor:pointer;user-select:none;}
 .dias-picker .dia-check input{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;}
+.escala-toggle{margin-top:4px;font-size:12.5px !important;color:var(--muted) !important;}
+.escala-toggle input{width:16px;height:16px;accent-color:var(--accent);}
+.escala-b{display:flex;flex-direction:column;gap:6px;padding:10px 12px;background:var(--surface-2);border-radius:var(--radius-sm);}
+.escala-b[hidden]{display:none;}
+.dia-check input[type=checkbox],.dia-check input[type=radio]{min-height:0;padding:0;margin:0;flex:0 0 auto;}
+.dias-picker .dia-check input[type=radio]{width:16px;height:16px;accent-color:var(--accent);}
 
 /* ---------- Profile drawer ---------- */
 .overlay{
