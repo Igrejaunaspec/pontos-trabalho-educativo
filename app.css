@@ -622,8 +622,40 @@ fieldset{border:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1
   /* Ponto: painel lateral do desktop dá lugar ao acordeão inline na lista */
   .punch-detail-card{display:none;}
   .punch-inline-acc{display:block;}
-  .punch-item{flex-wrap:wrap;row-gap:4px;}
-  .punch-item .name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  /* Lista de alunos no "Registrar ponto": cada aluno vira um cartão
+     separado, com o status ("Saiu às…", "Sem registro hoje") logo embaixo
+     do PRÓPRIO nome — antes o status quebrava linha e parecia pertencer
+     ao aluno de baixo. Lista rola com a página (sem rolagem interna). */
+  .punch-list{max-height:none;overflow:visible;gap:8px;}
+  .punch-item{
+    display:grid;grid-template-columns:auto 1fr auto;align-items:center;
+    column-gap:12px;row-gap:6px;padding:12px 14px;
+    background:var(--surface);border:1px solid var(--border);
+  }
+  .punch-item.selected{border-color:var(--accent);}
+  .punch-item .avatar{grid-column:1;grid-row:1 / span 2;width:36px;height:36px;font-size:12px;}
+  .punch-item .name{grid-column:2;grid-row:1;font-size:15px;line-height:1.3;white-space:normal;overflow:visible;}
+  .punch-item > .pill{grid-column:2;grid-row:2;justify-self:start;}
+  .punch-item .chev{grid-column:3;grid-row:1 / span 2;}
+  .punch-item.bulk-item{grid-template-columns:auto auto 1fr;}
+  .punch-item.bulk-item .check-box{grid-column:1;grid-row:1 / span 2;width:24px;height:24px;}
+  .punch-item.bulk-item .check-box.checked::after{left:8px;top:3px;}
+  .punch-item.bulk-item .avatar{grid-column:2;}
+  .punch-item.bulk-item .name,.punch-item.bulk-item > .pill{grid-column:3;}
+
+  /* Barra da seleção múltipla: contador em cima, botões lado a lado */
+  .bulk-toolbar{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .bulk-toolbar .meta{grid-column:1 / -1;margin:0;}
+  .bulk-toolbar .btn:only-child{grid-column:1 / -1;}
+  .bulk-toolbar .btn{background:var(--surface-2);}
+  /* Botão "+4h" fica sempre visível acima do menu inferior, sem precisar
+     rolar até o fim da lista */
+  .bulk-actionbar{
+    position:sticky;bottom:calc(76px + env(safe-area-inset-bottom));z-index:5;
+    background:var(--surface);margin:12px -18px -16px;padding:12px 18px;
+    border-radius:0 0 var(--radius) var(--radius);
+    box-shadow:0 -8px 18px -12px rgba(19,42,70,.35);
+  }
 
   /* Dashboard: tabela de pendências → cartões empilhados (sem scroll horizontal) */
   .table-wrap table,.table-wrap thead,.table-wrap tbody,.table-wrap th,.table-wrap td,.table-wrap tr{
