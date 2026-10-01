@@ -98,20 +98,54 @@ var DIAS_TRABALHO_OPTS = [
    "Seg a sex.") antes dessa mudança, não batem com nenhum código — ficam de fora do
    array (não quebra nada, só não participa do destaque de falta/dia extra no
    Calendário até alguém reabrir o cadastro e marcar as caixinhas certas). */
-function diasTrabalhoArray(s){
+function parseDiasCodigos(str){
   var codigos = DIAS_TRABALHO_OPTS.map(function(o){return o.code;});
-  return String((s && s.diasTrabalho) || '').split(',').map(function(x){return x.trim().toLowerCase();})
+  return String(str || '').split(',').map(function(x){return x.trim().toLowerCase();})
     .filter(function(x){ return codigos.indexOf(x) !== -1; });
 }
+function diasCodigosLabel(arr){
+  var map = {}; DIAS_TRABALHO_OPTS.forEach(function(o){ map[o.code]=o.label; });
+  return arr.map(function(c){ return map[c]; }).join(', ');
+}
+function diasTrabalhoArray(s){ return parseDiasCodigos(s && s.diasTrabalho); }
+
+/* Escala alternada — aluno que numa semana trabalha uns dias e na seguinte
+   outros (ex.: semana 1 Ter/Qui/Sex, semana 2 Qui/Sex), revezando sem parar.
+   s.diasTrabalho = dias da Semana 1, s.diasTrabalhoB = dias da Semana 2,
+   s.diasTrabalhoRefA = data (AAAA-MM-DD) de uma segunda-feira que foi
+   "Semana 1" — a partir dela o sistema conta as semanas pares/ímpares pra
+   saber qual vale em qualquer dia do calendário, passado ou futuro. */
+function diasTrabalhoArrayB(s){ return parseDiasCodigos(s && s.diasTrabalhoB); }
+function escalaAlternada(s){ return !!(s && s.escalaAlternada && s.diasTrabalhoRefA); }
+function segundaDaSemana(d){
+  var x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - ((x.getDay()+6)%7));
+  return x;
+}
+function semanaDaEscala(s, d){
+  var p = String(s.diasTrabalhoRefA).split('-');
+  var ref = new Date(parseInt(p[0],10), parseInt(p[1],10)-1, parseInt(p[2],10));
+  var diff = Math.round((segundaDaSemana(d) - segundaDaSemana(ref)) / (7*86400000));
+  return (((diff % 2) + 2) % 2) === 0 ? 1 : 2;
+}
+function diasTrabalhoNaData(s, d){
+  if(!escalaAlternada(s)) return diasTrabalhoArray(s);
+  return semanaDaEscala(s, d) === 1 ? diasTrabalhoArray(s) : diasTrabalhoArrayB(s);
+}
+function temDiasProgramados(s){
+  return diasTrabalhoArray(s).length > 0 || (escalaAlternada(s) && diasTrabalhoArrayB(s).length > 0);
+}
+
 /* Texto pra exibir nas telas de listagem/perfil — converte os códigos salvos de volta
    pros rótulos (Seg, Ter…). Se o cadastro ainda tiver o texto livre antigo (não bate
    com nenhum código), mostra esse texto como está, pra não perder a informação. */
 function diasTrabalhoLabel(s){
-  var arr = diasTrabalhoArray(s);
-  if(arr.length){
-    var map = {}; DIAS_TRABALHO_OPTS.forEach(function(o){ map[o.code]=o.label; });
-    return arr.map(function(c){ return map[c]; }).join(', ');
+  if(escalaAlternada(s)){
+    return 'Sem. 1: ' + (diasCodigosLabel(diasTrabalhoArray(s)) || 'nenhum') +
+      ' · Sem. 2: ' + (diasCodigosLabel(diasTrabalhoArrayB(s)) || 'nenhum');
   }
+  var arr = diasTrabalhoArray(s);
+  if(arr.length) return diasCodigosLabel(arr);
   return (s && s.diasTrabalho) || '';
 }
 
@@ -1329,8 +1363,8 @@ function calendarioCorpo(s, opts){
   // destaque de falta/dia-extra quando o cadastro tem pelo menos um dia marcado
   // no formato novo — cadastro sem isso preenchido (ou ainda no texto livre
   // antigo) não ganha destaque nenhum, pra não acusar falta à toa.
-  var diasCombinados = diasTrabalhoArray(s);
-  var temProgramacao = diasCombinados.length > 0;
+  var temProgramacao = temDiasProgramados(s);
+  var alternada = escalaAlternada(s);
 
   var totalDiasComRegistro = 0, totalMin = 0;
   var cells = dias.map(function(d){
@@ -1352,11 +1386,12 @@ function calendarioCorpo(s, opts){
     // ponto certinho), dá pra ler os casos direto no calendário: contornado
     // sem verde = faltou num dia combinado; verde sem contorno = veio num
     // dia que não era combinado.
-    var deveriaVir = temProgramacao && diasCombinados.indexOf(DIA_SEMANA_CODE[d.getDay()]) !== -1;
+    var deveriaVir = temProgramacao && diasTrabalhoNaData(s, d).indexOf(DIA_SEMANA_CODE[d.getDay()]) !== -1;
+    var semanaTxt = alternada ? ' (semana '+semanaDaEscala(s, d)+')' : '';
     var faltou = !futuro && deveriaVir && !temRegistro;
     var veioExtra = !futuro && temProgramacao && !deveriaVir && temRegistro;
     var titulo = incompleto ? 'Bateu ponto, mas ficou sem par nesse dia (falta entrada ou saída) — não soma nas horas'
-      : deveriaVir ? (faltou ? 'Dia de trabalho combinado — sem ponto batido' : 'Dia de trabalho combinado')
+      : deveriaVir ? (faltou ? 'Dia de trabalho combinado'+semanaTxt+' — sem ponto batido' : 'Dia de trabalho combinado'+semanaTxt)
       : (veioExtra ? 'Veio num dia que não é combinado' : '');
 
     var cls = 'cal-cell' + (temRegistro && !incompleto?' has-reg':'') + (incompleto?' cal-incompleto':'') + (key===hojeKey?' is-today':'') + ((UI.calendarioDiaSel===key||UI.calendarioDiaPreview===key)?' selected':'') + (futuro?' cal-futuro':'') + (deveriaVir?' cal-programado':'') + (veioExtra?' cal-extra':'');
@@ -1403,6 +1438,7 @@ function calendarioCorpo(s, opts){
       mesPassadoCard +
     '</div>' +
     mesNav +
+    (alternada ? '<div class="view-sub" style="margin:-4px 0 10px;">Escala alternada — esta semana é a <b>semana '+semanaDaEscala(s, new Date())+'</b> · '+esc(diasTrabalhoLabel(s))+'</div>' : '') +
     '<div class="cal-weekdays">'+headerDias+'</div>' +
     '<div class="cal-grid">'+padCells+cells+'</div>' +
     previewDiaHtml(s, UI.calendarioDiaPreview) +
@@ -1707,7 +1743,7 @@ function renderDrawer(){
   var creating = UI.drawerCreate;
   var aprovando = creating && UI.aprovandoCadastroUid;
   var s = creating ? Object.assign(
-    {id:'', nome:'', setor:STATE.setores[0].id, nivel: aprovando?'FAC':'EM', bolsa:'', ra:'', telefone:'', aniversario:'', curso:'', diasTrabalho:'', pendenteHerdada:'', observacao:'', ativo:true},
+    {id:'', nome:'', setor:STATE.setores[0].id, nivel: aprovando?'FAC':'EM', bolsa:'', ra:'', telefone:'', aniversario:'', curso:'', diasTrabalho:'', diasTrabalhoB:'', escalaAlternada:false, diasTrabalhoRefA:'', pendenteHerdada:'', observacao:'', ativo:true},
     (UI.aprovandoCadastroDados || {})
   ) : studentById(UI.drawerId);
   if(!s){ UI.drawerId = null; return; }
@@ -1752,6 +1788,11 @@ function renderDrawer(){
     } else {
       prompt('Copie o link de acesso de '+s.nome+':', link);
     }
+  });
+  var escalaChk = $('[name="escalaAlternada"]', overlay);
+  if(escalaChk) escalaChk.addEventListener('change', function(){
+    var bloco = $('.escala-b', overlay); if(bloco) bloco.hidden = !escalaChk.checked;
+    var lbl = $('[data-dias-label-a]', overlay); if(lbl) lbl.textContent = escalaChk.checked ? 'Dias de trabalho — Semana 1' : 'Dias de trabalho';
   });
   var form = $('#form-perfil', overlay);
   if(form) form.addEventListener('submit', function(e){
@@ -1804,6 +1845,12 @@ function drawerView(s){
 function kv(k,v,full){
   return '<div class="kv'+(full?' full':'')+'"><span class="k">'+esc(k)+'</span><span class="v">'+esc(v)+'</span></div>';
 }
+function diasPickerHtml(nome, marcados){
+  return '<div class="dias-picker">' + DIAS_TRABALHO_OPTS.map(function(opt){
+    var checked = marcados.indexOf(opt.code) !== -1;
+    return '<label class="dia-check"><input type="checkbox" name="'+nome+'" value="'+opt.code+'"'+(checked?' checked':'')+'> '+opt.label+'</label>';
+  }).join('') + '</div>';
+}
 function drawerEditForm(s, creating, aprovando){
   var setorOpts = STATE.setores.map(function(x){ return '<option value="'+x.id+'"'+(x.id===s.setor?' selected':'')+'>'+esc(x.nome)+'</option>'; }).join('');
   return (
@@ -1826,14 +1873,23 @@ function drawerEditForm(s, creating, aprovando){
       '</div>' +
       '<label>Curso<input type="text" name="curso" value="'+esc(s.curso)+'"></label>' +
       '<div class="field-block">' +
-        '<span class="field-block-label">Dias de trabalho</span>' +
-        '<div class="dias-picker">'+(function(){
-          var marcados = diasTrabalhoArray(s);
-          return DIAS_TRABALHO_OPTS.map(function(opt){
-            var checked = marcados.indexOf(opt.code) !== -1;
-            return '<label class="dia-check"><input type="checkbox" name="diasTrabalho" value="'+opt.code+'"'+(checked?' checked':'')+'> '+opt.label+'</label>';
-          }).join('');
-        })()+'</div>' +
+        '<span class="field-block-label" data-dias-label-a>'+(escalaAlternada(s)?'Dias de trabalho — Semana 1':'Dias de trabalho')+'</span>' +
+        diasPickerHtml('diasTrabalho', diasTrabalhoArray(s)) +
+        '<label class="dia-check escala-toggle"><input type="checkbox" name="escalaAlternada" value="1"'+(escalaAlternada(s)?' checked':'')+'> Alterna entre duas semanas (ex.: 3 dias numa semana, 2 na outra)</label>' +
+        '<div class="escala-b"'+(escalaAlternada(s)?'':' hidden')+'>' +
+          '<span class="field-block-label">Dias de trabalho — Semana 2</span>' +
+          diasPickerHtml('diasTrabalhoB', diasTrabalhoArrayB(s)) +
+          (function(){
+            var seg = segundaDaSemana(new Date());
+            var dom = new Date(seg); dom.setDate(dom.getDate()+6);
+            var atual = escalaAlternada(s) ? semanaDaEscala(s, new Date()) : 1;
+            return '<span class="field-block-label" style="margin-top:6px;">Esta semana ('+fmtDateBR(todayKey(seg)).slice(0,5)+' a '+fmtDateBR(todayKey(dom)).slice(0,5)+') é a:</span>' +
+              '<div class="dias-picker">' +
+                '<label class="dia-check"><input type="radio" name="semanaAtual" value="1"'+(atual===1?' checked':'')+'> Semana 1</label>' +
+                '<label class="dia-check"><input type="radio" name="semanaAtual" value="2"'+(atual===2?' checked':'')+'> Semana 2</label>' +
+              '</div>';
+          })() +
+        '</div>' +
       '</div>' +
       '<label>Observações<textarea name="observacao">'+esc(s.observacao)+'</textarea></label>' +
       '<div class="toolbar"><button class="btn btn-primary" type="submit">'+(aprovando?'Aprovar e cadastrar':(creating?'Cadastrar aluno':'Salvar alterações'))+'</button>' +
@@ -1855,6 +1911,19 @@ function saveProfileForm(form, s, creating){
     diasTrabalho: fd.getAll('diasTrabalho').join(','), // caixinhas marcadas (Seg..Dom), ex.: "seg,ter,qua,qui,sex"
     observacao: (fd.get('observacao')||'').trim()
   };
+  // Escala alternada: guarda os dias da Semana 2 e a segunda-feira de
+  // referência da Semana 1 (calculada a partir de "esta semana é a 1 ou 2").
+  if(fd.get('escalaAlternada')){
+    var segAtual = segundaDaSemana(new Date());
+    if(fd.get('semanaAtual') === '2') segAtual.setDate(segAtual.getDate() - 7);
+    patch.escalaAlternada = true;
+    patch.diasTrabalhoB = fd.getAll('diasTrabalhoB').join(',');
+    patch.diasTrabalhoRefA = todayKey(segAtual);
+  } else {
+    patch.escalaAlternada = false;
+    patch.diasTrabalhoB = '';
+    patch.diasTrabalhoRefA = '';
+  }
   if(!patch.nome){ toast('Informe o nome do aluno.', 'err'); return; }
   if(creating){
     var novo = Object.assign({id: uid('s'), pendenteHerdada:'', ativo:true, horasSemana: STATE.bolsaHoras[patch.bolsa]===undefined?null:STATE.bolsaHoras[patch.bolsa]}, patch);
