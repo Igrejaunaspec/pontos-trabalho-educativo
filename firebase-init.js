@@ -12,7 +12,7 @@ import {
   createUserWithEmailAndPassword, deleteUser, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
-  getFirestore, doc, setDoc, updateDoc, deleteDoc, getDoc, getDocs, onSnapshot, collection, query, where, writeBatch
+  getFirestore, doc, setDoc, updateDoc, deleteDoc, getDoc, getDocs, onSnapshot, collection, query, where, writeBatch, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 var firebaseConfig = {
@@ -365,6 +365,7 @@ window.__pontosLogout = function(){
   stopAllListeners();
   booted = false;
   lastSentJSON = null;
+  baseStateJSON = null;
   signOut(auth);
 };
 
@@ -383,21 +384,144 @@ function stopAllListeners(){
    Admin — app/state (perfis, setores, líderes, bolsas, log de
    atividade) + coleções "registros" e "pedidos"
    ============================================================ */
-window.__pontosSaveState = function(state){
-  var clean = JSON.parse(JSON.stringify(state));
-  delete clean.registros; // vive só na coleção "registros" agora
-  delete clean.pedidos;   // vive só na coleção "pedidos" agora
-  lastSentJSON = JSON.stringify(clean);
+/* ------------------------------------------------------------
+   Salvamento à prova de "tela velha" (corrige o sumiço de alunos).
+   Antes: cada salvamento regravava app/state INTEIRO com a cópia que
+   estava na tela. Uma aba/celular com uma versão antiga da lista
+   apagava, sem querer, alunos que tinham sido adicionados em outro
+   lugar. Agora: guardamos a versão do servidor da qual a tela partiu
+   (baseStateJSON) e, ao salvar, calculamos SÓ o que esta tela mudou
+   (aluno criado/editado/excluído, config alterada, logs novos) e
+   aplicamos isso sobre a versão ATUAL do servidor, dentro de uma
+   transação. O que esta tela não mexeu fica como está no servidor.
+   ------------------------------------------------------------ */
+var baseStateJSON = null;   // versão de app/state da qual o STATE da tela foi derivado
+var lastDocDataRef = null;  // última versão conhecida do servidor (preenchida pelo listener)
+var salvandoAgora = 0;
+var emitPendente = false;
+var emitAdminRef = null;
+var saveChain = Promise.resolve();
+var CHAVES_FORA_DO_STATE = ['registros', 'pedidos', 'cadastrosPendentes'];
 
-  var batch = writeBatch(db);
-  batch.set(STATE_DOC, clean);
-  (clean.students || []).forEach(function(s){
-    var setorNome = '';
-    (clean.setores || []).some(function(x){ if(x.id === s.setor){ setorNome = x.nome; return true; } return false; });
-    batch.set(doc(db, 'students', s.id), Object.assign({}, s, {setorNome: setorNome}));
+function stableStringify(v){
+  if(v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+  if(Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  return '{' + Object.keys(v).filter(function(k){ return v[k] !== undefined; }).sort().map(function(k){
+    return JSON.stringify(k) + ':' + stableStringify(v[k]);
+  }).join(',') + '}';
+}
+function limparState(state){
+  var c = JSON.parse(JSON.stringify(state || {}));
+  CHAVES_FORA_DO_STATE.forEach(function(k){ delete c[k]; });
+  return c;
+}
+function mapaPorId(lista){
+  var m = {};
+  (lista || []).forEach(function(x){ if(x && x.id) m[x.id] = x; });
+  return m;
+}
+function chaveLog(a){ return (a && a.ts) + '|' + (a && a.texto); }
+
+function mesclarState(base, local, remote){
+  var out = {};
+  var chaves = {};
+  [base, local, remote].forEach(function(o){ Object.keys(o).forEach(function(k){ chaves[k] = true; }); });
+  Object.keys(chaves).forEach(function(k){
+    if(k === 'students' || k === 'activityLog' || CHAVES_FORA_DO_STATE.indexOf(k) !== -1) return;
+    var mudouAqui = stableStringify(local[k]) !== stableStringify(base[k]);
+    var v = mudouAqui ? local[k] : remote[k];
+    if(v !== undefined) out[k] = v;
   });
-  return batch.commit();
+
+  // Alunos: começa pela lista do servidor e aplica só o que esta tela mudou.
+  var baseMap = mapaPorId(base.students), localMap = mapaPorId(local.students);
+  var alterados = {};
+  var lista = [], vistos = {};
+  (remote.students || []).forEach(function(rs){
+    vistos[rs.id] = true;
+    var ls = localMap[rs.id], bs = baseMap[rs.id];
+    if(bs && !ls) return; // esta tela excluiu esse aluno
+    if(ls && stableStringify(ls) !== stableStringify(bs)){ lista.push(ls); alterados[ls.id] = true; }
+    else lista.push(rs);
+  });
+  (local.students || []).forEach(function(ls){
+    if(vistos[ls.id]) return;
+    if(!baseMap[ls.id]){ lista.push(ls); alterados[ls.id] = true; } // aluno novo criado nesta tela
+    // (estava na base e sumiu do servidor = outra tela excluiu; respeitamos)
+  });
+  out.students = lista;
+
+  // Log de atividade: junta as entradas novas desta tela com as do servidor.
+  var baseLog = {};
+  (base.activityLog || []).forEach(function(a){ baseLog[chaveLog(a)] = true; });
+  var vistosLog = {}, log = [];
+  (local.activityLog || []).filter(function(a){ return !baseLog[chaveLog(a)]; })
+    .concat(remote.activityLog || [])
+    .forEach(function(a){ var k = chaveLog(a); if(!vistosLog[k]){ vistosLog[k] = true; log.push(a); } });
+  log.sort(function(a, b){ return String(b.ts).localeCompare(String(a.ts)); });
+  out.activityLog = log.slice(0, 60);
+
+  return {final: out, alterados: alterados};
+}
+
+function gravarDocsAlunos(tx, final, ids){
+  ids.forEach(function(id){
+    var s = null;
+    (final.students || []).some(function(x){ if(x.id === id){ s = x; return true; } return false; });
+    if(!s) return;
+    var setorNome = '';
+    (final.setores || []).some(function(x){ if(x.id === s.setor){ setorNome = x.nome; return true; } return false; });
+    tx.set(doc(db, 'students', s.id), Object.assign({}, s, {setorNome: setorNome}));
+  });
+}
+
+window.__pontosSaveState = function(state){
+  var local = limparState(state);
+  var base = baseStateJSON ? JSON.parse(baseStateJSON) : null;
+  salvandoAgora++;
+  var p = saveChain.then(function(){
+    return runTransaction(db, function(tx){
+      return tx.get(STATE_DOC).then(function(snap){
+        var remote = snap.exists() ? limparState(snap.data()) : {};
+        var final, ids;
+        if(base){
+          var r = mesclarState(base, local, remote);
+          final = r.final;
+          ids = Object.keys(r.alterados);
+          // Nome de setor mudou: atualiza setorNome no perfil de todo mundo.
+          if(stableStringify(final.setores) !== stableStringify(base.setores)){
+            ids = (final.students || []).map(function(s){ return s.id; });
+          }
+        } else {
+          final = local;
+          ids = (final.students || []).map(function(s){ return s.id; });
+        }
+        tx.set(STATE_DOC, final);
+        gravarDocsAlunos(tx, final, ids);
+        return final;
+      });
+    });
+  }).then(function(final){
+    var json = stableStringify(final);
+    lastSentJSON = json;
+    baseStateJSON = JSON.stringify(final);
+    lastDocDataRef = final;
+    // Se a mescla trouxe coisas que esta tela não tinha (ex.: aluno
+    // cadastrado em outra aba), atualiza a tela com a versão final.
+    if(json !== stableStringify(local)) emitPendente = true;
+    return final;
+  });
+  saveChain = p.catch(function(){});
+  p.then(fimSalvamento, fimSalvamento);
+  return p;
 };
+function fimSalvamento(){
+  salvandoAgora = Math.max(0, salvandoAgora - 1);
+  if(salvandoAgora === 0 && emitPendente && emitAdminRef){
+    emitPendente = false;
+    emitAdminRef();
+  }
+}
 
 window.__pontosAddRegistro = function(rec){
   return setDoc(doc(db, 'registros', rec.id), rec);
@@ -417,15 +541,22 @@ window.__pontosUpdatePedido = function(id, patch){
 
 function startListeningAdmin(){
   if(unsubAdminState) return;
-  var lastDocData = null;
   var lastRegistros = [];
   var lastPedidos = [];
   var lastCadastros = [];
   var alunoRASynced = false;
+  lastDocDataRef = null;
 
   function emit(){
-    if(lastDocData===null) return;
-    var merged = Object.assign({}, lastDocData, {registros: lastRegistros, pedidos: lastPedidos, cadastrosPendentes: lastCadastros});
+    if(lastDocDataRef===null) return;
+    // Durante um salvamento, não troca o STATE da tela (evitaria piscar
+    // de volta pra versão anterior); atualiza assim que terminar.
+    if(booted && salvandoAgora > 0){ emitPendente = true; return; }
+    // Cópia profunda: a tela pode mexer no STATE à vontade sem alterar a
+    // "versão base" que usamos pra calcular o que mudou ao salvar.
+    var copia = JSON.parse(JSON.stringify(lastDocDataRef));
+    baseStateJSON = JSON.stringify(limparState(lastDocDataRef));
+    var merged = Object.assign(copia, {registros: lastRegistros, pedidos: lastPedidos, cadastrosPendentes: lastCadastros});
     if(!booted){
       booted = true;
       clearLoadTimeout();
@@ -438,6 +569,7 @@ function startListeningAdmin(){
       syncAlunoRA(merged.students || []);
     }
   }
+  emitAdminRef = emit;
 
   unsubAdminState = onSnapshot(STATE_DOC, function(snap){
     if(!snap.exists()){
@@ -445,9 +577,8 @@ function startListeningAdmin(){
       return;
     }
     var data = snap.data();
-    var json = JSON.stringify(data);
-    lastDocData = data;
-    if(json === lastSentJSON) return; // eco do nosso próprio salvamento
+    lastDocDataRef = data;
+    if(stableStringify(limparState(data)) === lastSentJSON) return; // eco do nosso próprio salvamento
     emit();
   }, function(err){ console.error('[pontos] snapshot error', err); });
 
@@ -977,6 +1108,7 @@ onAuthStateChanged(auth, function(user){
     stopAllListeners();
     booted = false;
     lastSentJSON = null;
+    baseStateJSON = null;
     if(conviteRA && !conviteDismissed && !pendingLoginMessage){
       showConviteScreen();
     } else {
